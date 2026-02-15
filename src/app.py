@@ -1,5 +1,9 @@
 """Main entry point — role routing and sidebar navigation."""
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
 from src.database import init_db
 from src.auth import render_auth_sidebar
