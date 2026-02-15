@@ -17,6 +17,7 @@ from src.utils.db_helpers import (
     create_asset, get_assets, delete_asset, create_debt, get_debts,
     delete_debt, add_audit_entry,
 )
+from src.documents.generator import generate_initial_disclosure
 from src.utils.formatters import fmt_currency, fmt_date, now_utc
 
 STEPS = ["Property", "Borrower", "Co-Borrower", "Employment", "Assets & Debts", "Review & Submit"]
@@ -629,6 +630,13 @@ def _step_review_submit(app: dict):
             add_audit_entry(
                 app["id"], "STATUS_CHANGE",
                 "Status changed from DRAFT to SUBMITTED",
+                st.session_state.get("borrower_email", ""),
+            )
+            # Generate initial disclosure PDF on submit
+            generate_initial_disclosure(app["id"])
+            add_audit_entry(
+                app["id"], "DOCUMENT_GENERATED",
+                "Initial Disclosure generated",
                 st.session_state.get("borrower_email", ""),
             )
             st.success(f"Application **{app['application_number']}** submitted successfully!")

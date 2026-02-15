@@ -1,5 +1,6 @@
 """Borrower document uploads (stub — filename only) and generated doc downloads."""
 
+import os
 import streamlit as st
 
 from src.config import REQUIRED_DOCUMENTS
@@ -8,6 +9,7 @@ from src.utils.db_helpers import (
     get_generated_documents,
 )
 from src.utils.formatters import fmt_datetime
+from src.documents.generator import OUTPUT_DIR
 
 
 def render():
@@ -80,8 +82,19 @@ def render():
         for doc in gen_docs:
             col1, col2, col3 = st.columns([3, 2, 1])
             col1.write(doc["doc_type"].replace("_", " ").title())
-            col2.write(doc["filename"])
-            col3.caption(fmt_datetime(doc["generated_at"]))
+            col2.caption(fmt_datetime(doc["generated_at"]))
+            filepath = os.path.join(OUTPUT_DIR, doc["filename"])
+            if os.path.exists(filepath):
+                with open(filepath, "rb") as f:
+                    col3.download_button(
+                        "Download",
+                        data=f.read(),
+                        file_name=doc["filename"],
+                        mime="application/pdf",
+                        key=f"dl_gen_{doc['id']}",
+                    )
+            else:
+                col3.caption("File not found")
     else:
         st.caption("No generated documents yet. Documents will appear here as your "
                    "application progresses.")

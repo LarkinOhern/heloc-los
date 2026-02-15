@@ -23,6 +23,7 @@ from src.utils.db_helpers import (
 )
 from src.engines.underwriting import UnderwritingInput, run_underwriting
 from src.engines.pricing import PricingInput, calculate_pricing
+from src.documents.generator import generate_decision_letter, generate_closing_documents
 from src.utils.formatters import fmt_currency, fmt_date, fmt_datetime, fmt_percent, fmt_rate, now_utc
 
 
@@ -140,6 +141,14 @@ def _render_status_bar(app: dict):
                 f"Status changed from {status} to {new_status}",
                 current_user,
             )
+            # Auto-generate closing documents when moving to CLOSING
+            if new_status == "CLOSING":
+                filename = generate_closing_documents(app["id"])
+                add_audit_entry(
+                    app["id"], "DOCUMENT_GENERATED",
+                    f"Closing documents generated: {filename}",
+                    current_user,
+                )
             st.rerun()
 
 
@@ -393,6 +402,14 @@ def _execute_underwriting(app: dict, current_user: str):
         current_user,
     )
 
+    # Auto-generate the approval or denial letter
+    filename = generate_decision_letter(app["id"])
+    add_audit_entry(
+        app["id"], "DOCUMENT_GENERATED",
+        f"Decision letter generated: {filename}",
+        current_user,
+    )
+
 
 # ── Tab: Pricing ─────────────────────────────────────────────────────────────
 
@@ -560,10 +577,24 @@ def _tab_documents(app: dict):
     st.write("**Generated Documents**")
     gen_docs = get_generated_documents(app["id"])
     if gen_docs:
+        import os
+        from src.documents.generator import OUTPUT_DIR
         for doc in gen_docs:
-            col1, col2 = st.columns([3, 3])
+            col1, col2, col3 = st.columns([3, 2, 1])
             col1.write(doc["doc_type"].replace("_", " ").title())
-            col2.write(f"{doc['filename']} ({fmt_datetime(doc['generated_at'])})")
+            col2.caption(fmt_datetime(doc["generated_at"]))
+            filepath = os.path.join(OUTPUT_DIR, doc["filename"])
+            if os.path.exists(filepath):
+                with open(filepath, "rb") as f:
+                    col3.download_button(
+                        "Download",
+                        data=f.read(),
+                        file_name=doc["filename"],
+                        mime="application/pdf",
+                        key=f"emp_dl_{doc['id']}",
+                    )
+            else:
+                col3.caption("File not found")
     else:
         st.caption("No generated documents yet.")
 
