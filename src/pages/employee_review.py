@@ -18,7 +18,9 @@ from src.utils.db_helpers import (
     get_documents, get_generated_documents,
     get_conditions, get_audit_log,
     update_application, add_audit_entry,
+    create_underwriting_decision, create_condition,
 )
+from src.engines.underwriting import UnderwritingInput, run_underwriting
 from src.utils.formatters import fmt_currency, fmt_date, fmt_datetime, fmt_percent, fmt_rate, now_utc
 
 
@@ -261,12 +263,26 @@ def _tab_assets_debts(app: dict):
 # ── Tab: Underwriting ────────────────────────────────────────────────────────
 
 def _tab_underwriting(app: dict):
-    """Underwriting decisions history. The actual engine is wired in Phase 4."""
-    decisions = get_underwriting_decisions(app["id"])
+    """Run underwriting engine and display decision history."""
+    current_user = st.session_state.get("current_user", "")
 
-    if app["status"] in ("SUBMITTED", "IN_REVIEW", "UNDERWRITING"):
-        st.info("Underwriting engine will be available in Phase 4. "
-                "Use status changes to simulate for now.")
+    # ── Run Underwriting Button ──────────────────────────────────────
+    # Only enable if the application is in a status where UW makes sense.
+    # We check UNDERWRITING specifically but also allow IN_REVIEW since
+    # an employee might want to pre-check before formally moving to UW.
+    can_run = app["status"] in ("IN_REVIEW", "UNDERWRITING")
+
+    if can_run:
+        if st.button("Run Underwriting Engine", type="primary"):
+            _execute_underwriting(app, current_user)
+            st.rerun()
+    elif app["status"] in ("SUBMITTED",):
+        st.info("Move the application to **In Review** or **Underwriting** before running the engine.")
+
+    st.divider()
+
+    # ── Decision History ─────────────────────────────────────────────
+    decisions = get_underwriting_decisions(app["id"])
 
     if not decisions:
         st.caption("No underwriting decisions recorded yet.")
@@ -274,7 +290,14 @@ def _tab_underwriting(app: dict):
 
     for dec in decisions:
         decision_label = dec["decision"].replace("_", " ").title()
-        st.write(f"**Decision: {decision_label}** — {fmt_datetime(dec['decided_at'])}")
+        # Color-code the decision
+        if dec["decision"] == "APPROVE":
+            st.success(f"**{decision_label}** — {fmt_datetime(dec['decided_at'])}")
+        elif dec["decision"] == "DENY":
+            st.error(f"**{decision_label}** — {fmt_datetime(dec['decided_at'])}")
+        else:
+            st.warning(f"**{decision_label}** — {fmt_datetime(dec['decided_at'])}")
+
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("LTV", fmt_percent(dec["ltv"]))
         col2.metric("CLTV", fmt_percent(dec["cltv"]))
@@ -293,7 +316,80 @@ def _tab_underwriting(app: dict):
             for c in conditions:
                 st.write(f"- {c}")
 
+        st.caption(f"Decided by: {dec['decided_by']}")
         st.divider()
+
+
+def _execute_underwriting(app: dict, current_user: str):
+    """Gather input data, run the engine, save results, update status."""
+    borrowers = get_borrowers(app["id"])
+
+    # Collect credit scores from all borrowers
+    credit_scores = [b["credit_score"] for b in borrowers]
+
+    # Sum income across all borrowers
+    total_income = 0.0
+    for b in borrowers:
+        jobs = get_employment(b["id"])
+        total_income += sum(j["monthly_income"] for j in jobs)
+
+    # Sum existing debts (primary borrower only, per our data model)
+    primary = next((b for b in borrowers if b["is_primary"]), None)
+    total_debts = 0.0
+    if primary:
+        debts = get_debts(primary["id"])
+        total_debts = sum(d["monthly_payment"] for d in debts)
+
+    # Build engine input and run
+    inp = UnderwritingInput(
+        property_value=app["property_value"],
+        existing_mortgage_balance=app["existing_mortgage_balance"],
+        heloc_amount_requested=app["heloc_amount_requested"],
+        credit_scores=credit_scores,
+        total_monthly_income=total_income,
+        total_monthly_debts=total_debts,
+    )
+    result = run_underwriting(inp)
+
+    # Save the decision to the database
+    all_reasons = result.hard_fails + result.warnings
+    create_underwriting_decision(
+        app["id"],
+        decision=result.decision,
+        ltv=result.ltv,
+        cltv=result.cltv,
+        dti=result.dti,
+        highest_credit_score=result.highest_credit_score,
+        reasons=json.dumps(all_reasons),
+        conditions=json.dumps(result.conditions),
+        decided_by=current_user,
+    )
+
+    # Auto-create condition records for APPROVE_WITH_CONDITIONS
+    if result.decision == "APPROVE_WITH_CONDITIONS":
+        for cond_text in result.conditions:
+            create_condition(
+                app["id"],
+                condition_type="PRIOR_TO_CLOSING",
+                description=cond_text,
+                added_by="UW_ENGINE",
+            )
+
+    # Map engine decision to application status
+    status_map = {
+        "APPROVE": "APPROVED",
+        "APPROVE_WITH_CONDITIONS": "APPROVED_WITH_CONDITIONS",
+        "DENY": "DENIED",
+    }
+    new_status = status_map.get(result.decision, app["status"])
+    old_status = app["status"]
+
+    update_application(app["id"], status=new_status)
+    add_audit_entry(
+        app["id"], "UNDERWRITING_DECISION",
+        f"Engine decision: {result.decision}. Status changed from {old_status} to {new_status}.",
+        current_user,
+    )
 
 
 # ── Tab: Pricing ─────────────────────────────────────────────────────────────
