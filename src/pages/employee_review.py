@@ -19,8 +19,10 @@ from src.utils.db_helpers import (
     get_conditions, get_audit_log,
     update_application, add_audit_entry,
     create_underwriting_decision, create_condition,
+    create_pricing_lock,
 )
 from src.engines.underwriting import UnderwritingInput, run_underwriting
+from src.engines.pricing import PricingInput, calculate_pricing
 from src.utils.formatters import fmt_currency, fmt_date, fmt_datetime, fmt_percent, fmt_rate, now_utc
 
 
@@ -395,26 +397,143 @@ def _execute_underwriting(app: dict, current_user: str):
 # ── Tab: Pricing ─────────────────────────────────────────────────────────────
 
 def _tab_pricing(app: dict):
-    """Pricing/rate lock history. The pricing engine is wired in Phase 5."""
+    """Calculate pricing, display rate breakdown, and manage rate locks."""
+    current_user = st.session_state.get("current_user", "")
     locks = get_pricing_locks(app["id"])
 
-    st.info("Pricing engine will be available in Phase 5.")
+    # ── Calculate Pricing Button ─────────────────────────────────────
+    # Pricing requires a UW decision first so we have the credit score
+    # and CLTV. Check if there's at least one decision on file.
+    decisions = get_underwriting_decisions(app["id"])
+    can_price = bool(decisions) and app["status"] not in ("DRAFT", "SUBMITTED", "DENIED", "WITHDRAWN")
 
+    if can_price:
+        if st.button("Calculate Pricing", type="primary"):
+            _execute_pricing(app, decisions[0], current_user)
+            st.rerun()
+    elif not decisions:
+        st.info("Run underwriting first — pricing needs the credit score and CLTV from the UW decision.")
+
+    st.divider()
+
+    # ── Pricing History ──────────────────────────────────────────────
     if not locks:
         st.caption("No pricing calculations yet.")
         return
 
     for lock in locks:
-        st.write(f"**Final Rate: {fmt_rate(lock['final_rate'])}**")
-        col1, col2, col3 = st.columns(3)
-        col1.write(f"Prime: {fmt_rate(lock['prime_rate'])}")
-        col2.write(f"Margin: {fmt_rate(lock['margin'])}")
-        col3.write(f"Monthly Payment: {fmt_currency(lock['monthly_payment'])}")
+        st.write(f"### Rate: {fmt_rate(lock['final_rate'])}")
 
-        if lock["rate_locked"]:
-            st.success(f"Rate locked on {fmt_date(lock['lock_date'])} — "
-                       f"expires {fmt_date(lock['lock_expiration'])}")
+        # Rate breakdown table — shows every component so the employee
+        # can explain the rate to the borrower.
+        col1, col2 = st.columns(2)
+        col1.write("**Rate Component**")
+        col2.write("**Value**")
+
+        components = [
+            ("Prime Rate", f"+{fmt_rate(lock['prime_rate'])}"),
+            ("Base Margin", f"+{fmt_rate(lock['margin'])}"),
+            ("FICO Adjustment", f"{lock['fico_adjustment']:+.3f}%"),
+            ("LTV Adjustment", f"{lock['ltv_adjustment']:+.3f}%"),
+            ("Amount Adjustment", f"{lock['amount_adjustment']:+.3f}%"),
+            ("Autopay Discount", f"-{fmt_rate(lock['autopay_discount'])}" if lock['autopay_discount'] else "N/A"),
+        ]
+        for label, value in components:
+            c1, c2 = st.columns(2)
+            c1.write(label)
+            c2.write(value)
+
         st.divider()
+        col1, col2 = st.columns(2)
+        col1.metric("Final Rate", fmt_rate(lock["final_rate"]))
+        col2.metric("Est. Monthly Payment (IO)", fmt_currency(lock["monthly_payment"]))
+
+        # ── Rate Lock ────────────────────────────────────────────────
+        if lock["rate_locked"]:
+            # Show lock status with countdown
+            from datetime import datetime
+            lock_exp = datetime.fromisoformat(lock["lock_expiration"])
+            now_dt = datetime.utcnow()
+            days_remaining = (lock_exp - now_dt).days
+
+            if days_remaining > 0:
+                st.success(
+                    f"Rate locked on {fmt_date(lock['lock_date'])} — "
+                    f"**{days_remaining} days remaining** "
+                    f"(expires {fmt_date(lock['lock_expiration'])})"
+                )
+            else:
+                st.error(
+                    f"Rate lock **expired** on {fmt_date(lock['lock_expiration'])}. "
+                    f"Re-calculate pricing and lock a new rate."
+                )
+        else:
+            if st.button("Lock This Rate", key=f"lock_{lock['id']}"):
+                _lock_rate(app, lock, current_user)
+                st.rerun()
+
+        st.divider()
+
+
+def _execute_pricing(app: dict, latest_decision: dict, current_user: str):
+    """Run the pricing engine using data from the latest UW decision."""
+    pv = app["property_value"]
+    cltv = latest_decision["cltv"] if latest_decision["cltv"] > 0 else (
+        (app["existing_mortgage_balance"] + app["heloc_amount_requested"]) / pv if pv > 0 else 0
+    )
+
+    inp = PricingInput(
+        highest_credit_score=latest_decision["highest_credit_score"],
+        cltv=cltv,
+        heloc_amount=app["heloc_amount_requested"],
+        autopay_enrolled=bool(app["autopay_enrolled"]),
+    )
+    result = calculate_pricing(inp)
+
+    create_pricing_lock(
+        app["id"],
+        prime_rate=result.prime_rate,
+        margin=result.margin,
+        fico_adjustment=result.fico_adjustment,
+        ltv_adjustment=result.ltv_adjustment,
+        amount_adjustment=result.amount_adjustment,
+        autopay_discount=result.autopay_discount,
+        final_rate=result.final_rate,
+        monthly_payment=result.monthly_payment,
+        rate_locked=False,
+        locked_by=current_user,
+    )
+    add_audit_entry(
+        app["id"], "PRICING_CALCULATED",
+        f"Rate calculated: {result.final_rate:.3f}% "
+        f"(payment: ${result.monthly_payment:,.2f}/mo)",
+        current_user,
+    )
+
+
+def _lock_rate(app: dict, lock: dict, current_user: str):
+    """Lock the rate with a 60-day expiration."""
+    from datetime import datetime, timedelta
+    from src.config import RATE_LOCK_DAYS
+    from src.database import get_connection
+
+    now_str = now_utc()
+    expiration = (datetime.utcnow() + timedelta(days=RATE_LOCK_DAYS)).isoformat()
+
+    # Update the pricing_locks row directly
+    conn = get_connection()
+    conn.execute(
+        "UPDATE pricing_locks SET rate_locked=1, lock_date=?, lock_expiration=?, locked_by=? WHERE id=?",
+        (now_str, expiration, current_user, lock["id"]),
+    )
+    conn.commit()
+    conn.close()
+
+    add_audit_entry(
+        app["id"], "RATE_LOCKED",
+        f"Rate of {lock['final_rate']:.3f}% locked for {RATE_LOCK_DAYS} days (expires {expiration[:10]})",
+        current_user,
+    )
 
 
 # ── Tab: Documents ───────────────────────────────────────────────────────────
