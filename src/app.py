@@ -23,6 +23,13 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Demo Disclaimer ─────────────────────────────────────────────────────────
+st.sidebar.warning(
+    "**DEMO APPLICATION** -- For educational and evaluation purposes only. "
+    "Do NOT enter real personally identifiable information (SSN, DOB, real "
+    "names, etc.). All data is fictitious sample data."
+)
+
 # Initialize database and seed sample data if empty
 init_db()
 
