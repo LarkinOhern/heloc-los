@@ -15,7 +15,8 @@ import sqlite3
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "heloc_los.db")
 
-_USE_TURSO = None  # cached after first check
+# Cached Turso connection — reused across calls to avoid repeated sync overhead.
+_turso_conn = None
 
 
 def _get_turso_config():
@@ -88,7 +89,12 @@ class _DictCursor:
 
 
 class _DictConnection:
-    """Wraps a libsql connection to return dict-like rows from execute()."""
+    """Wraps a libsql connection to return dict-like rows from execute().
+
+    Uses the embedded replica pattern: reads are local (fast), writes sync
+    to Turso only on commit(). close() is a no-op since the connection is
+    reused across calls.
+    """
     def __init__(self, conn):
         self._conn = conn
 
@@ -104,10 +110,10 @@ class _DictConnection:
 
     def commit(self):
         self._conn.commit()
-        self._conn.sync()
+        self._conn.sync()  # push writes to Turso
 
     def close(self):
-        self._conn.close()
+        pass  # no-op — connection is reused via _turso_conn cache
 
 
 def get_connection():
@@ -115,15 +121,22 @@ def get_connection():
 
     Uses Turso (libsql) when configured, otherwise local SQLite.
     Both return dict-style row access by column name.
+
+    Turso connections are cached and reused. The initial sync() pulls the
+    full DB locally; after that, reads hit the local replica (fast) and
+    only commit() calls sync back to Turso (one round-trip per write).
     """
+    global _turso_conn
     url, token = _get_turso_config()
 
     if url and token:
-        import libsql
-        conn = libsql.connect("heloc_los.db", sync_url=url, auth_token=token)
-        conn.sync()
-        conn.execute("PRAGMA foreign_keys=ON")
-        return _DictConnection(conn)
+        if _turso_conn is None:
+            import libsql
+            raw = libsql.connect("heloc_los.db", sync_url=url, auth_token=token)
+            raw.sync()  # one-time pull on startup
+            raw.execute("PRAGMA foreign_keys=ON")
+            _turso_conn = _DictConnection(raw)
+        return _turso_conn
     else:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
