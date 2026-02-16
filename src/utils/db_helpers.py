@@ -26,7 +26,7 @@ def generate_application_number() -> str:
 def create_application(**kwargs) -> int:
     """Create a new application and return its id."""
     now = now_utc()
-    app_number = generate_application_number()
+    app_number = kwargs.pop("application_number", None) or generate_application_number()
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO applications

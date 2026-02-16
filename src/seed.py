@@ -23,16 +23,22 @@ from src.documents.generator import (
 )
 
 
-def _seed_apps_exist() -> bool:
-    """Check if the seed applications are already in the database.
+# Seed apps use DEMO- prefix so they never collide with real user apps.
+SEED_APP_NUMBERS = [
+    "DEMO-2026-000001",
+    "DEMO-2026-000002",
+    "DEMO-2026-000003",
+    "DEMO-2026-000004",
+    "DEMO-2026-000005",
+]
 
-    Looks for HELOC-2026-000001 (the first seed app) specifically, so
-    seed data can coexist with user-created applications.
-    """
+
+def _seed_apps_exist() -> bool:
+    """Check if the seed applications are already in the database."""
     conn = get_connection()
     row = conn.execute(
         "SELECT COUNT(*) as cnt FROM applications WHERE application_number = ?",
-        ("HELOC-2026-000001",),
+        (SEED_APP_NUMBERS[0],),
     ).fetchone()
     conn.close()
     return row["cnt"] > 0
@@ -54,6 +60,7 @@ def seed_database():
         coborrower=("Marge", "Simpson", "marge@example.com", "555-0002", "5678", 780),
         employer="Springfield Nuclear", position="Safety Inspector", income=9500,
         co_employer="Springfield Elementary", co_position="Substitute Teacher", co_income=3200,
+        app_number=SEED_APP_NUMBERS[0],
         assets=[("CHECKING", "First Bank", 45000), ("SAVINGS", "First Bank", 28000),
                 ("RETIREMENT", "Fidelity", 125000)],
         debts=[("MORTGAGE", "Home Federal", 1350, 180000), ("AUTO", "Toyota Financial", 450, 18000)],
@@ -91,6 +98,7 @@ def seed_database():
         employer="Federal Government", position="Executive", income=15000,
         assets=[("CHECKING", "Treasury Direct", 200000), ("INVESTMENT", "Vanguard", 500000)],
         debts=[("MORTGAGE", "Fannie Mae", 2800, 400000), ("PERSONAL", "SBA", 500, 15000)],
+        app_number=SEED_APP_NUMBERS[1],
     )
     update_application(app2["app_id"], status="SUBMITTED", submitted_at=now_utc(),
                        econsent_given=1, econsent_date=now_utc(), assigned_employee="bwilson")
@@ -120,6 +128,7 @@ def seed_database():
         employer="Self Employed", position="Consulting Detective", income=7000,
         assets=[("CHECKING", "Barclays", 15000)],
         debts=[("MORTGAGE", "HSBC", 2100, 260000), ("CREDIT_CARD", "Amex", 800, 25000)],
+        app_number=SEED_APP_NUMBERS[2],
     )
     update_application(app3["app_id"], status="SUBMITTED", submitted_at=now_utc(),
                        econsent_given=1, econsent_date=now_utc(), assigned_employee="jsmith")
@@ -143,6 +152,7 @@ def seed_database():
         employer="Stark Industries", position="CEO", income=50000,
         assets=[("CHECKING", "Goldman Sachs", 2000000), ("INVESTMENT", "Schwab", 5000000)],
         debts=[("MORTGAGE", "JPMorgan", 4500, 600000), ("AUTO", "Mercedes Financial", 1200, 85000)],
+        app_number=SEED_APP_NUMBERS[3],
     )
     update_application(app4["app_id"], status="SUBMITTED", submitted_at=now_utc(),
                        econsent_given=1, econsent_date=now_utc())
@@ -160,6 +170,7 @@ def seed_database():
         co_employer="Daily Prophet", co_position="Sports Editor", co_income=4500,
         assets=[("SAVINGS", "Gringotts", 350000), ("CHECKING", "Gringotts", 45000)],
         debts=[("MORTGAGE", "Diagon Alley Lending", 1650, 220000), ("STUDENT", "Hogwarts", 350, 12000)],
+        app_number=SEED_APP_NUMBERS[4],
     )
     update_application(app5["app_id"], status="SUBMITTED", submitted_at=now_utc(),
                        econsent_given=1, econsent_date=now_utc(), assigned_employee="bwilson")
@@ -180,13 +191,16 @@ def seed_database():
 def _create_app(address, city, state, zip, value, mortgage, heloc, purpose, autopay,
                 borrower, employer, position, income,
                 coborrower=None, co_employer=None, co_position=None, co_income=None,
-                assets=None, debts=None):
+                assets=None, debts=None, app_number=None):
     """Helper to create an application with borrower, employment, assets, debts."""
-    app_id = create_application(
+    kwargs = dict(
         property_address=address, property_city=city, property_state=state,
         property_zip=zip, property_value=value, existing_mortgage_balance=mortgage,
         heloc_amount_requested=heloc, heloc_purpose=purpose, autopay_enrolled=int(autopay),
     )
+    if app_number:
+        kwargs["application_number"] = app_number
+    app_id = create_application(**kwargs)
 
     first, last, email, phone, ssn4, score = borrower
     bid = create_borrower(app_id, is_primary=True, first_name=first, last_name=last,

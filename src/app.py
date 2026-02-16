@@ -41,7 +41,7 @@ st.sidebar.warning(
 from src.seed import seed_database
 
 # Bump _DB_VERSION to force re-initialization (e.g., to re-seed after changes).
-_DB_VERSION = 2
+_DB_VERSION = 3
 
 @st.cache_resource
 def _init_once(_version):
