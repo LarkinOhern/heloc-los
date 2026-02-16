@@ -107,4 +107,8 @@ def render():
         if col6.button("Review", key=f"review_{row['id']}"):
             st.session_state["review_app_id"] = row["id"]
             st.session_state["_pending_nav"] = "Review Application"
+            # Delete the radio widget keys so the default index takes
+            # effect on rerun (Streamlit ignores index if key exists)
+            st.session_state.pop("lo_nav", None)
+            st.session_state.pop("admin_nav", None)
             st.rerun()
