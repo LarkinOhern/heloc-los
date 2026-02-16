@@ -106,10 +106,5 @@ def render():
         col5.write(row["Submitted"])
         if col6.button("Review", key=f"review_{row['id']}"):
             st.session_state["review_app_id"] = row["id"]
-            # Switch nav to Review page. The key depends on whether user is
-            # LO or Admin (different radio keys in app.py).
-            if st.session_state.get("role") == "Admin":
-                st.session_state["admin_nav"] = "Review Application"
-            else:
-                st.session_state["lo_nav"] = "Review Application"
+            st.session_state["_pending_nav"] = "Review Application"
             st.rerun()

@@ -19,7 +19,7 @@ from src.pages import (
 
 st.set_page_config(
     page_title="HELOC LOS",
-    page_icon="🏠",
+    page_icon="\U0001f3e0",
     layout="wide",
 )
 
@@ -33,6 +33,15 @@ seed_database()
 render_auth_sidebar()
 
 role = st.session_state.get("role", "Borrower")
+
+
+def _get_nav_default(options: list[str]) -> int:
+    """Check for a pending navigation request and return the index to default to."""
+    target = st.session_state.pop("_pending_nav", None)
+    if target and target in options:
+        return options.index(target)
+    return 0
+
 
 # ── Borrower Pages ───────────────────────────────────────────────────────────
 if role == "Borrower":
@@ -55,9 +64,11 @@ if role == "Borrower":
 
 # ── Loan Officer Pages ──────────────────────────────────────────────────────
 elif role == "Loan Officer":
+    lo_options = ["Pipeline", "Review Application", "Conditions"]
     page = st.sidebar.radio(
         "Navigation",
-        ["Pipeline", "Review Application", "Conditions"],
+        lo_options,
+        index=_get_nav_default(lo_options),
         key="lo_nav",
     )
     st.sidebar.caption(
@@ -72,9 +83,11 @@ elif role == "Loan Officer":
 
 # ── Admin Pages ──────────────────────────────────────────────────────────────
 elif role == "Admin":
+    admin_options = ["Pipeline", "Review Application", "Conditions", "Admin Config"]
     page = st.sidebar.radio(
         "Navigation",
-        ["Pipeline", "Review Application", "Conditions", "Admin Config"],
+        admin_options,
+        index=_get_nav_default(admin_options),
         key="admin_nav",
     )
     st.sidebar.caption(
