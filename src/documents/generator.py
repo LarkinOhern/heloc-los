@@ -40,6 +40,16 @@ class HelocPDF(FPDF):
         self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")
 
 
+def _sanitize(text: str) -> str:
+    """Replace non-Latin-1 characters so fpdf2's built-in fonts don't choke.
+
+    fpdf2's Helvetica only supports Latin-1. Rather than hunting down every
+    possible Unicode character from user input, we encode to Latin-1 and
+    replace anything that doesn't fit.
+    """
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
 def _render_pdf(sections: list[dict], title: str) -> bytes:
     """Render a list of sections into a PDF and return the bytes."""
     pdf = HelocPDF()
@@ -49,13 +59,13 @@ def _render_pdf(sections: list[dict], title: str) -> bytes:
 
     # Document title
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(0, 10, _sanitize(title), new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(4)
 
     for section in sections:
         # Section heading
         pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 8, section["heading"], new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, _sanitize(section["heading"]), new_x="LMARGIN", new_y="NEXT")
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(2)
 
@@ -65,7 +75,7 @@ def _render_pdf(sections: list[dict], title: str) -> bytes:
             if line == "":
                 pdf.ln(3)
             else:
-                pdf.multi_cell(0, 5, line, new_x="LMARGIN", new_y="NEXT")
+                pdf.multi_cell(0, 5, _sanitize(line), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
 
     return pdf.output()
