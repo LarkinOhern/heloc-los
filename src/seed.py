@@ -23,19 +23,26 @@ from src.documents.generator import (
 )
 
 
-def db_is_empty() -> bool:
-    """Check if the applications table has any rows."""
+def _seed_apps_exist() -> bool:
+    """Check if the seed applications are already in the database.
+
+    Looks for HELOC-2026-000001 (the first seed app) specifically, so
+    seed data can coexist with user-created applications.
+    """
     conn = get_connection()
-    row = conn.execute("SELECT COUNT(*) as cnt FROM applications").fetchone()
+    row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM applications WHERE application_number = ?",
+        ("HELOC-2026-000001",),
+    ).fetchone()
     conn.close()
-    return row["cnt"] == 0
+    return row["cnt"] > 0
 
 
 def seed_database():
     """Create sample data across all workflow stages."""
     init_db()
     seed_settings()  # Populate config defaults into DB
-    if not db_is_empty():
+    if _seed_apps_exist():
         return
 
     # ── App 1: Fully funded (complete happy path) ────────────────────

@@ -24,6 +24,7 @@ from src.utils.db_helpers import (
 from src.config_manager import get_setting
 from src.engines.underwriting import UnderwritingInput, run_underwriting
 from src.engines.pricing import PricingInput, calculate_pricing
+from src.utils.styles import status_badge
 from src.documents.generator import generate_decision_letter, generate_closing_documents
 from src.utils.formatters import fmt_currency, fmt_date, fmt_datetime, fmt_percent, fmt_rate, now_utc
 
@@ -107,9 +108,7 @@ def _render_status_bar(app: dict):
 
     # Status badge
     col1.markdown(
-        f'**{app["application_number"]}** &nbsp; '
-        f'<span style="background-color:{color}; color:white; padding:4px 12px; '
-        f'border-radius:12px; font-weight:bold;">{label}</span>',
+        f'**{app["application_number"]}** &nbsp; {status_badge(status)}',
         unsafe_allow_html=True,
     )
 

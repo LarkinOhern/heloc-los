@@ -11,6 +11,7 @@ import streamlit as st
 from src.config import STATUSES, STATUS_LABELS, STATUS_COLORS
 from src.utils.db_helpers import get_all_applications, get_borrowers
 from src.utils.formatters import fmt_currency, fmt_date
+from src.utils.styles import pipeline_card, status_badge
 
 
 def render():
@@ -22,9 +23,6 @@ def render():
         return
 
     # ── Status Counts ────────────────────────────────────────────────────
-    # Show key statuses as metric cards so employees can see workload.
-    # We skip DRAFT (borrower hasn't submitted) and terminal states like
-    # FUNDED/WITHDRAWN since those aren't actionable.
     actionable = ["SUBMITTED", "IN_REVIEW", "UNDERWRITING",
                   "APPROVED", "APPROVED_WITH_CONDITIONS", "CLOSING"]
     counts = {s: 0 for s in actionable}
@@ -36,17 +34,12 @@ def render():
     for i, status in enumerate(actionable):
         label = STATUS_LABELS.get(status, status)
         color = STATUS_COLORS.get(status, "#9e9e9e")
-        cols[i].markdown(
-            f'<div style="text-align:center; padding:8px; border-left:4px solid {color};">'
-            f'<div style="font-size:24px; font-weight:bold;">{counts[status]}</div>'
-            f'<div style="font-size:12px; color:#666;">{label}</div></div>',
-            unsafe_allow_html=True,
-        )
+        cols[i].markdown(pipeline_card(counts[status], label, color),
+                         unsafe_allow_html=True)
 
     st.divider()
 
     # ── Filters ──────────────────────────────────────────────────────────
-    # Let employees filter by status so they can focus on their queue.
     col1, col2 = st.columns(2)
     status_filter = col1.multiselect(
         "Filter by Status",
@@ -57,10 +50,8 @@ def render():
     search = col2.text_input("Search (app number or borrower name)", "")
 
     # ── Build Table Data ─────────────────────────────────────────────────
-    # Enrich each application with the primary borrower name for display.
     rows = []
     for a in apps:
-        # Skip drafts — those are the borrower's problem, not the employee's
         if a["status"] == "DRAFT":
             continue
         if status_filter and a["status"] not in status_filter:
@@ -68,9 +59,8 @@ def render():
 
         borrowers = get_borrowers(a["id"])
         primary = next((b for b in borrowers if b["is_primary"]), None)
-        borrower_name = f"{primary['first_name']} {primary['last_name']}" if primary else "—"
+        borrower_name = f"{primary['first_name']} {primary['last_name']}" if primary else "--"
 
-        # Text search across app number and borrower name
         if search:
             search_lower = search.lower()
             if (search_lower not in a["application_number"].lower()
@@ -79,13 +69,12 @@ def render():
 
         rows.append({
             "id": a["id"],
-            "App Number": a["application_number"],
-            "Borrower": borrower_name,
-            "Status": STATUS_LABELS.get(a["status"], a["status"]),
-            "HELOC Amount": fmt_currency(a["heloc_amount_requested"]),
-            "Property Value": fmt_currency(a["property_value"]),
-            "Submitted": fmt_date(a["submitted_at"]),
-            "Assigned To": a["assigned_employee"] or "Unassigned",
+            "app_number": a["application_number"],
+            "borrower": borrower_name,
+            "status": a["status"],
+            "heloc_amount": fmt_currency(a["heloc_amount_requested"]),
+            "submitted": fmt_date(a["submitted_at"]),
+            "assigned": a["assigned_employee"] or "Unassigned",
         })
 
     if not rows:
@@ -94,21 +83,28 @@ def render():
 
     st.caption(f"Showing {len(rows)} application{'s' if len(rows) != 1 else ''}")
 
+    # ── Table Header ─────────────────────────────────────────────────────
+    hcols = st.columns([2, 2, 1.5, 1.5, 1.5, 1.2, 0.8])
+    hcols[0].markdown("**App Number**")
+    hcols[1].markdown("**Borrower**")
+    hcols[2].markdown("**Status**")
+    hcols[3].markdown("**HELOC Amount**")
+    hcols[4].markdown("**Submitted**")
+    hcols[5].markdown("**Assigned**")
+    hcols[6].markdown("**Action**")
+
     # ── Render Each Row ──────────────────────────────────────────────────
-    # Using columns instead of a dataframe so we can embed a "Review" button
-    # on each row that navigates to the review page.
     for row in rows:
-        col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 1.5, 1.5, 1.5, 1])
-        col1.write(f"**{row['App Number']}**")
-        col2.write(row["Borrower"])
-        col3.write(row["Status"])
-        col4.write(row["HELOC Amount"])
-        col5.write(row["Submitted"])
-        if col6.button("Review", key=f"review_{row['id']}"):
+        col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 2, 1.5, 1.5, 1.5, 1.2, 0.8])
+        col1.write(f"**{row['app_number']}**")
+        col2.write(row["borrower"])
+        col3.markdown(status_badge(row["status"]), unsafe_allow_html=True)
+        col4.write(row["heloc_amount"])
+        col5.write(row["submitted"])
+        col6.write(row["assigned"])
+        if col7.button("Review", key=f"review_{row['id']}"):
             st.session_state["review_app_id"] = row["id"]
             st.session_state["_pending_nav"] = "Review Application"
-            # Delete the radio widget keys so the default index takes
-            # effect on rerun (Streamlit ignores index if key exists)
             st.session_state.pop("lo_nav", None)
             st.session_state.pop("admin_nav", None)
             st.rerun()

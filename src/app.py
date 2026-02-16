@@ -23,6 +23,10 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Global Styles ───────────────────────────────────────────────────────────
+from src.utils.styles import inject_css
+inject_css()
+
 # ── Demo Disclaimer ─────────────────────────────────────────────────────────
 st.sidebar.warning(
     "**DEMO APPLICATION** -- For educational and evaluation purposes only. "
@@ -36,12 +40,15 @@ st.sidebar.warning(
 # sync calls on every page load (~2-3s each = 40+ second loads).
 from src.seed import seed_database
 
+# Bump _DB_VERSION to force re-initialization (e.g., to re-seed after changes).
+_DB_VERSION = 2
+
 @st.cache_resource
-def _init_once():
+def _init_once(_version):
     init_db()
     seed_database()
 
-_init_once()
+_init_once(_DB_VERSION)
 
 # Render auth sidebar (sets role in session state)
 render_auth_sidebar()

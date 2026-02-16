@@ -29,6 +29,7 @@ def render():
         "Pricing Configuration",
         "Workflow",
         "Lender Info",
+        "Config Changes",
         "Audit Log",
     ])
 
@@ -41,6 +42,8 @@ def render():
     with tabs[3]:
         _tab_lender()
     with tabs[4]:
+        _tab_config_changes()
+    with tabs[5]:
         _tab_audit()
 
     # Reset all button at the bottom
@@ -354,6 +357,43 @@ def _tab_lender():
     st.write(f"**Address:** {LENDER_ADDRESS}")
     st.write(f"**NMLS:** {LENDER_NMLS}")
     st.write(f"**Phone:** {LENDER_PHONE}")
+
+
+# ── Config Changes ────────────────────────────────────────────────────────────
+
+def _tab_config_changes():
+    st.subheader("Configuration Change History")
+    st.caption("Every change to underwriting guidelines and pricing configuration is tracked here.")
+
+    entries = get_system_audit_log()
+
+    if not entries:
+        st.info("No configuration changes have been recorded yet. "
+                "Changes will appear here when an admin updates UW or pricing settings.")
+        return
+
+    st.caption(f"{len(entries)} total changes")
+
+    rows = []
+    for e in entries:
+        # Parse the action into a readable category
+        action = e["action"]
+        if action == "CONFIG_CHANGE":
+            category = "Setting Updated"
+        elif action == "CONFIG_RESET":
+            category = "Settings Reset"
+        else:
+            category = action.replace("_", " ").title()
+
+        rows.append({
+            "When": fmt_datetime(e["performed_at"]),
+            "Category": category,
+            "What Changed": e["details"],
+            "Changed By": e["performed_by"],
+        })
+
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 # ── Audit Log ────────────────────────────────────────────────────────────────
