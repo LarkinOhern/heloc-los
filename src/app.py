@@ -23,8 +23,11 @@ st.set_page_config(
     layout="wide",
 )
 
-# Initialize database on first run
+# Initialize database and seed sample data if empty
 init_db()
+
+from src.seed import seed_database
+seed_database()
 
 # Render auth sidebar (sets role in session state)
 render_auth_sidebar()

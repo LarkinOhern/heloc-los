@@ -13,7 +13,7 @@ def initial_disclosure(app: dict, borrower: dict) -> list[dict]:
     """Truth-in-Lending style initial disclosure generated on submission."""
     return [
         {
-            "heading": "IMPORTANT DISCLOSURE — PLEASE READ CAREFULLY",
+            "heading": "IMPORTANT DISCLOSURE - PLEASE READ CAREFULLY",
             "lines": [
                 f"Application Number: {app['application_number']}",
                 f"Date: {fmt_date(app['submitted_at'])}",

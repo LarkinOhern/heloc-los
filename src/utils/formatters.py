@@ -23,7 +23,7 @@ def fmt_rate(value: float) -> str:
 def fmt_date(iso_str: str | None) -> str:
     """Format an ISO 8601 string to a readable date."""
     if not iso_str:
-        return "—"
+        return "--"
     try:
         dt = datetime.fromisoformat(iso_str)
         return dt.strftime("%b %d, %Y")
@@ -34,7 +34,7 @@ def fmt_date(iso_str: str | None) -> str:
 def fmt_datetime(iso_str: str | None) -> str:
     """Format an ISO 8601 string to a readable datetime."""
     if not iso_str:
-        return "—"
+        return "--"
     try:
         dt = datetime.fromisoformat(iso_str)
         return dt.strftime("%b %d, %Y %I:%M %p")
