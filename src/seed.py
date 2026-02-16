@@ -7,6 +7,7 @@ demonstrate all features immediately.
 
 import json
 from src.database import get_connection, init_db
+from src.config_manager import seed_settings
 from src.utils.db_helpers import (
     create_application, create_borrower, create_employment,
     create_asset, create_debt, create_underwriting_decision,
@@ -33,6 +34,7 @@ def db_is_empty() -> bool:
 def seed_database():
     """Create sample data across all workflow stages."""
     init_db()
+    seed_settings()  # Populate config defaults into DB
     if not db_is_empty():
         return
 

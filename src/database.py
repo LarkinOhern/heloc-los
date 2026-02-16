@@ -177,6 +177,12 @@ def init_db():
         FOREIGN KEY (application_id) REFERENCES applications(id)
     );
     CREATE INDEX IF NOT EXISTS idx_audit_app ON audit_log(application_id);
+
+    CREATE TABLE IF NOT EXISTS settings (
+        key     TEXT PRIMARY KEY,
+        value   TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
     """)
 
     conn.commit()

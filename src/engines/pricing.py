@@ -1,17 +1,13 @@
 """Risk-based pricing engine for HELOC rates.
 
 Pure function — takes application data and returns a pricing breakdown.
-The rate starts at Prime + margin, then adjusts based on FICO, LTV, and
-line amount tiers. Autopay discount is applied last before clamping.
+Reads rate tables from the config manager (DB-backed) so admin changes
+take effect immediately.
 """
 
 from dataclasses import dataclass
 
-from src.config import (
-    PRIME_RATE, BASE_MARGIN,
-    FICO_ADJUSTMENTS, LTV_ADJUSTMENTS, AMOUNT_ADJUSTMENTS,
-    AUTOPAY_DISCOUNT, RATE_FLOOR, RATE_CEILING,
-)
+from src.config_manager import get_setting
 
 
 @dataclass
@@ -40,42 +36,45 @@ def calculate_pricing(inp: PricingInput) -> PricingOutput:
     """Calculate the HELOC rate and monthly payment.
 
     Each adjustment tier is checked in order (best tier first), and the
-    first match is used. This means the tiers must be sorted from most
-    favorable to least favorable in config.py.
+    first match is used.
     """
+    # Read all pricing config from DB
+    prime_rate = get_setting("prime_rate")
+    base_margin = get_setting("base_margin")
+    fico_adjustments = get_setting("fico_adjustments")
+    ltv_adjustments = get_setting("ltv_adjustments")
+    amount_adjustments = get_setting("amount_adjustments")
+    autopay_discount = get_setting("autopay_discount")
+    rate_floor = get_setting("rate_floor")
+    rate_ceiling = get_setting("rate_ceiling")
+
     out = PricingOutput()
-    out.prime_rate = PRIME_RATE
-    out.margin = BASE_MARGIN
+    out.prime_rate = prime_rate
+    out.margin = base_margin
 
     # ── FICO Adjustment ──────────────────────────────────────────────
-    # Tiers are sorted best-first (760+, 720+, 680+). We take the first
-    # tier where the borrower's score meets the minimum.
-    for tier in FICO_ADJUSTMENTS:
+    for tier in fico_adjustments:
         if inp.highest_credit_score >= tier["min_score"]:
             out.fico_adjustment = tier["adjustment"]
             break
 
     # ── LTV Adjustment ───────────────────────────────────────────────
-    # Tiers are sorted by max_ltv ascending. Lower LTV = better rate.
-    for tier in LTV_ADJUSTMENTS:
+    for tier in ltv_adjustments:
         if inp.cltv <= tier["max_ltv"]:
             out.ltv_adjustment = tier["adjustment"]
             break
     else:
-        # If CLTV exceeds all tiers, use the worst (last) tier
-        out.ltv_adjustment = LTV_ADJUSTMENTS[-1]["adjustment"]
+        out.ltv_adjustment = ltv_adjustments[-1]["adjustment"]
 
     # ── Amount Adjustment ────────────────────────────────────────────
-    # Tiers are sorted largest-first. Bigger lines get better pricing
-    # because the lender earns more interest revenue.
-    for tier in AMOUNT_ADJUSTMENTS:
+    for tier in amount_adjustments:
         if inp.heloc_amount >= tier["min_amount"]:
             out.amount_adjustment = tier["adjustment"]
             break
 
     # ── Autopay Discount ─────────────────────────────────────────────
     if inp.autopay_enrolled:
-        out.autopay_discount = AUTOPAY_DISCOUNT
+        out.autopay_discount = autopay_discount
 
     # ── Final Rate ───────────────────────────────────────────────────
     raw_rate = (
@@ -86,11 +85,9 @@ def calculate_pricing(inp: PricingInput) -> PricingOutput:
         + out.amount_adjustment
         - out.autopay_discount
     )
-    out.final_rate = max(RATE_FLOOR, min(RATE_CEILING, raw_rate))
+    out.final_rate = max(rate_floor, min(rate_ceiling, raw_rate))
 
     # ── Monthly Payment (Interest-Only) ──────────────────────────────
-    # Standard interest-only calc: (balance * annual_rate) / 12
-    # Assumes full draw of the HELOC line.
     out.monthly_payment = (inp.heloc_amount * (out.final_rate / 100)) / 12
 
     return out
