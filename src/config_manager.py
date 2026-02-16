@@ -54,7 +54,17 @@ def seed_settings():
 
 
 def get_setting(key: str):
-    """Get a setting value from the DB, falling back to config.py default."""
+    """Get a setting value from the DB, falling back to config.py default.
+
+    Special case: 'fico_adjustments' is derived from 'credit_tiers' so they
+    stay in sync. The admin edits credit_tiers (which has labels + adjustments),
+    and the pricing engine reads fico_adjustments.
+    """
+    if key == "fico_adjustments":
+        tiers = get_setting("credit_tiers")
+        return [{"min_score": t["min_score"], "adjustment": t["rate_adjustment"]}
+                for t in tiers]
+
     conn = get_connection()
     row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
     conn.close()

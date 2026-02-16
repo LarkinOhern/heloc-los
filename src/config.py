@@ -28,16 +28,17 @@ MIN_HELOC_AMOUNT = 10_000
 MAX_HELOC_AMOUNT = 500_000
 
 CREDIT_TIERS = [
-    {"label": "Excellent", "min_score": 760, "max_score": 850},
-    {"label": "Good",      "min_score": 720, "max_score": 759},
-    {"label": "Fair",      "min_score": 680, "max_score": 719},
+    {"label": "Excellent", "min_score": 760, "max_score": 850, "rate_adjustment": -0.50},
+    {"label": "Good",      "min_score": 720, "max_score": 759, "rate_adjustment": -0.25},
+    {"label": "Fair",      "min_score": 680, "max_score": 719, "rate_adjustment":  0.00},
 ]
 
 # ── Pricing ──────────────────────────────────────────────────────────────────
 PRIME_RATE = 8.50          # Current prime rate %
 BASE_MARGIN = 0.00         # Added to prime
 
-# FICO tier adjustments (added to rate)
+# FICO tier adjustments — kept for backward compat but credit_tiers is the
+# source of truth. The pricing engine reads from credit_tiers via config manager.
 FICO_ADJUSTMENTS = [
     {"min_score": 760, "adjustment": -0.50},
     {"min_score": 720, "adjustment": -0.25},

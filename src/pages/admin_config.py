@@ -107,29 +107,58 @@ def _tab_underwriting():
         st.success("Underwriting thresholds saved.")
         st.rerun()
 
-    # ── Credit Tiers ─────────────────────────────────────────────────
+    # ── Credit Score Tiers (unified: labels + pricing adjustments) ──
     st.divider()
-    st.write("**Credit Tiers**")
-    st.caption("Define how credit score ranges are labeled. "
-               "These are informational — the min score threshold above controls eligibility.")
+    st.write("**Credit Score Tiers & Rate Adjustments**")
+    st.caption(
+        "Each tier defines a score range, a label, and a rate adjustment that "
+        "gets applied during pricing. For example, 'Excellent' borrowers (760+) "
+        "get a -0.50% rate discount. These tiers drive both underwriting classification "
+        "and pricing calculations."
+    )
 
     credit_tiers = get_setting("credit_tiers")
     with st.form("credit_tiers_form"):
+        # Header row
+        hcol1, hcol2, hcol3, hcol4 = st.columns([2, 1.5, 1.5, 1.5])
+        hcol1.write("**Tier Label**")
+        hcol2.write("**Min Score**")
+        hcol3.write("**Max Score**")
+        hcol4.write("**Rate Adjustment (%)**")
+
         updated_tiers = []
         for i, tier in enumerate(credit_tiers):
-            col1, col2, col3 = st.columns(3)
-            label = col1.text_input(f"Tier {i+1} Label", value=tier["label"], key=f"ct_label_{i}")
-            min_s = col2.number_input(f"Min Score", value=tier["min_score"], key=f"ct_min_{i}",
-                                       min_value=300, max_value=850)
-            max_s = col3.number_input(f"Max Score", value=tier["max_score"], key=f"ct_max_{i}",
-                                       min_value=300, max_value=850)
-            updated_tiers.append({"label": label, "min_score": int(min_s), "max_score": int(max_s)})
+            col1, col2, col3, col4 = st.columns([2, 1.5, 1.5, 1.5])
+            label = col1.text_input(
+                f"Label {i+1}", value=tier["label"], key=f"ct_label_{i}",
+                label_visibility="collapsed",
+            )
+            min_s = col2.number_input(
+                f"Min {i+1}", value=int(tier["min_score"]), key=f"ct_min_{i}",
+                min_value=300, max_value=850, label_visibility="collapsed",
+            )
+            max_s = col3.number_input(
+                f"Max {i+1}", value=int(tier["max_score"]), key=f"ct_max_{i}",
+                min_value=300, max_value=850, label_visibility="collapsed",
+            )
+            adj = col4.number_input(
+                f"Adj {i+1}", value=float(tier.get("rate_adjustment", 0.0)),
+                key=f"ct_adj_{i}", min_value=-3.0, max_value=3.0, step=0.05,
+                format="%.2f", label_visibility="collapsed",
+            )
+            updated_tiers.append({
+                "label": label,
+                "min_score": int(min_s),
+                "max_score": int(max_s),
+                "rate_adjustment": float(adj),
+            })
 
-        save_tiers = st.form_submit_button("Save Credit Tiers")
+        save_tiers = st.form_submit_button("Save Credit Tiers & Adjustments", type="primary")
 
     if save_tiers:
         set_setting("credit_tiers", updated_tiers)
-        st.success("Credit tiers saved.")
+        st.success("Credit tiers and rate adjustments saved. "
+                   "Changes will apply to the next pricing calculation.")
         st.rerun()
 
 
@@ -195,34 +224,11 @@ def _tab_pricing():
         st.success("Base rate settings saved.")
         st.rerun()
 
-    # ── FICO Adjustments ─────────────────────────────────────────────
+    # ── FICO / Credit Score Adjustments ──────────────────────────────
     st.divider()
-    st.write("**FICO Score Adjustments**")
-    st.caption("Tiers are checked top-to-bottom. First match wins. "
-               "Better scores should have the best (most negative) adjustments at the top.")
-
-    fico_adj = get_setting("fico_adjustments")
-    with st.form("fico_adj_form"):
-        updated_fico = []
-        for i, tier in enumerate(fico_adj):
-            col1, col2 = st.columns(2)
-            min_score = col1.number_input(
-                f"Min Score (Tier {i+1})", value=int(tier["min_score"]),
-                min_value=300, max_value=850, key=f"fico_min_{i}",
-            )
-            adj = col2.number_input(
-                f"Rate Adjustment (%)", value=float(tier["adjustment"]),
-                min_value=-3.0, max_value=3.0, step=0.05, format="%.2f",
-                key=f"fico_adj_{i}",
-            )
-            updated_fico.append({"min_score": int(min_score), "adjustment": float(adj)})
-
-        save_fico = st.form_submit_button("Save FICO Adjustments")
-
-    if save_fico:
-        set_setting("fico_adjustments", updated_fico)
-        st.success("FICO adjustments saved.")
-        st.rerun()
+    st.info("**FICO / Credit Score Adjustments** are managed in the "
+            "**Underwriting Guidelines** tab under *Credit Score Tiers & "
+            "Rate Adjustments*. Changes there automatically feed into pricing.")
 
     # ── LTV Adjustments ──────────────────────────────────────────────
     st.divider()
