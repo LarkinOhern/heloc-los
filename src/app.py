@@ -30,11 +30,18 @@ st.sidebar.warning(
     "names, etc.). All data is fictitious sample data."
 )
 
-# Initialize database and seed sample data if empty
-init_db()
-
+# Initialize database and seed sample data if empty.
+# @st.cache_resource ensures this runs ONCE per app lifecycle, not on every
+# Streamlit rerun.  Without this, init_db + seed_settings trigger 15+ Turso
+# sync calls on every page load (~2-3s each = 40+ second loads).
 from src.seed import seed_database
-seed_database()
+
+@st.cache_resource
+def _init_once():
+    init_db()
+    seed_database()
+
+_init_once()
 
 # Render auth sidebar (sets role in session state)
 render_auth_sidebar()
