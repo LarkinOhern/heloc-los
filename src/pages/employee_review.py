@@ -21,6 +21,7 @@ from src.utils.db_helpers import (
     create_underwriting_decision, create_condition,
     create_pricing_lock,
 )
+from src.config_manager import get_setting
 from src.engines.underwriting import UnderwritingInput, run_underwriting
 from src.engines.pricing import PricingInput, calculate_pricing
 from src.documents.generator import generate_decision_letter, generate_closing_documents
@@ -413,6 +414,38 @@ def _execute_underwriting(app: dict, current_user: str):
 
 # ── Tab: Pricing ─────────────────────────────────────────────────────────────
 
+def _match_pricing_tiers(lock: dict) -> tuple[str, str, str]:
+    """Match stored adjustment values back to current tier definitions.
+
+    Returns (fico_tier, ltv_tier, amount_tier) labels for display.
+    """
+    # FICO — match from credit_tiers (has labels)
+    fico_tier = ""
+    credit_tiers = get_setting("credit_tiers")
+    for tier in credit_tiers:
+        if abs(tier["rate_adjustment"] - lock["fico_adjustment"]) < 0.001:
+            fico_tier = f"{tier['label']} ({tier['min_score']}-{tier['max_score']})"
+            break
+
+    # LTV
+    ltv_tier = ""
+    ltv_adjustments = get_setting("ltv_adjustments")
+    for tier in ltv_adjustments:
+        if abs(tier["adjustment"] - lock["ltv_adjustment"]) < 0.001:
+            ltv_tier = f"CLTV <= {tier['max_ltv']:.0%}"
+            break
+
+    # Amount
+    amount_tier = ""
+    amount_adjustments = get_setting("amount_adjustments")
+    for tier in amount_adjustments:
+        if abs(tier["adjustment"] - lock["amount_adjustment"]) < 0.001:
+            amount_tier = f">= ${tier['min_amount']:,.0f}"
+            break
+
+    return fico_tier, ltv_tier, amount_tier
+
+
 def _tab_pricing(app: dict):
     """Calculate pricing, display rate breakdown, and manage rate locks."""
     current_user = st.session_state.get("current_user", "")
@@ -441,24 +474,31 @@ def _tab_pricing(app: dict):
     for lock in locks:
         st.write(f"### Rate: {fmt_rate(lock['final_rate'])}")
 
-        # Rate breakdown table — shows every component so the employee
-        # can explain the rate to the borrower.
-        col1, col2 = st.columns(2)
+        # Look up which tier each adjustment came from so the employee
+        # can explain exactly why the borrower got this rate.
+        fico_tier, ltv_tier, amount_tier = _match_pricing_tiers(lock)
+
+        # Rate breakdown table — shows every component with tier context.
+        col1, col2, col3 = st.columns([2, 1.5, 2])
         col1.write("**Rate Component**")
         col2.write("**Value**")
+        col3.write("**Tier Matched**")
 
         components = [
-            ("Prime Rate", f"+{fmt_rate(lock['prime_rate'])}"),
-            ("Base Margin", f"+{fmt_rate(lock['margin'])}"),
-            ("FICO Adjustment", f"{lock['fico_adjustment']:+.3f}%"),
-            ("LTV Adjustment", f"{lock['ltv_adjustment']:+.3f}%"),
-            ("Amount Adjustment", f"{lock['amount_adjustment']:+.3f}%"),
-            ("Autopay Discount", f"-{fmt_rate(lock['autopay_discount'])}" if lock['autopay_discount'] else "N/A"),
+            ("Prime Rate", f"+{fmt_rate(lock['prime_rate'])}", ""),
+            ("Base Margin", f"+{fmt_rate(lock['margin'])}", ""),
+            ("FICO Adjustment", f"{lock['fico_adjustment']:+.3f}%", fico_tier),
+            ("LTV Adjustment", f"{lock['ltv_adjustment']:+.3f}%", ltv_tier),
+            ("Amount Adjustment", f"{lock['amount_adjustment']:+.3f}%", amount_tier),
+            ("Autopay Discount",
+             f"-{fmt_rate(lock['autopay_discount'])}" if lock['autopay_discount'] else "N/A",
+             "Enrolled" if lock['autopay_discount'] else "Not enrolled"),
         ]
-        for label, value in components:
-            c1, c2 = st.columns(2)
+        for label, value, tier in components:
+            c1, c2, c3 = st.columns([2, 1.5, 2])
             c1.write(label)
             c2.write(value)
+            c3.write(tier)
 
         st.divider()
         col1, col2 = st.columns(2)

@@ -25,8 +25,11 @@ class PricingOutput:
     prime_rate: float = 0.0
     margin: float = 0.0
     fico_adjustment: float = 0.0
+    fico_tier: str = ""              # e.g. "Excellent (760-850)"
     ltv_adjustment: float = 0.0
+    ltv_tier: str = ""               # e.g. "CLTV <= 60%"
     amount_adjustment: float = 0.0
+    amount_tier: str = ""            # e.g. ">= $250,000"
     autopay_discount: float = 0.0
     final_rate: float = 0.0
     monthly_payment: float = 0.0     # Interest-only at full draw
@@ -53,23 +56,29 @@ def calculate_pricing(inp: PricingInput) -> PricingOutput:
     out.margin = base_margin
 
     # ── FICO Adjustment ──────────────────────────────────────────────
-    for tier in fico_adjustments:
+    # credit_tiers has labels; fico_adjustments is derived from them.
+    credit_tiers = get_setting("credit_tiers")
+    for tier in credit_tiers:
         if inp.highest_credit_score >= tier["min_score"]:
-            out.fico_adjustment = tier["adjustment"]
+            out.fico_adjustment = tier["rate_adjustment"]
+            out.fico_tier = f"{tier['label']} ({tier['min_score']}-{tier['max_score']})"
             break
 
     # ── LTV Adjustment ───────────────────────────────────────────────
     for tier in ltv_adjustments:
         if inp.cltv <= tier["max_ltv"]:
             out.ltv_adjustment = tier["adjustment"]
+            out.ltv_tier = f"CLTV <= {tier['max_ltv']:.0%}"
             break
     else:
         out.ltv_adjustment = ltv_adjustments[-1]["adjustment"]
+        out.ltv_tier = f"CLTV <= {ltv_adjustments[-1]['max_ltv']:.0%}"
 
     # ── Amount Adjustment ────────────────────────────────────────────
     for tier in amount_adjustments:
         if inp.heloc_amount >= tier["min_amount"]:
             out.amount_adjustment = tier["adjustment"]
+            out.amount_tier = f">= ${tier['min_amount']:,.0f}"
             break
 
     # ── Autopay Discount ─────────────────────────────────────────────
