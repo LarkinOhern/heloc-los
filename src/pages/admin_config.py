@@ -13,8 +13,12 @@ from src.config import (
     STATUSES, STATUS_LABELS, VALID_TRANSITIONS, EMPLOYEES,
 )
 from src.config_manager import get_setting, set_setting, reset_all_settings
-from src.utils.db_helpers import get_full_audit_log
+from src.utils.db_helpers import get_full_audit_log, get_system_audit_log, add_system_audit_entry
 from src.utils.formatters import fmt_datetime
+
+
+def _current_user():
+    return st.session_state.get("employee_display_name", "Admin")
 
 
 def render():
@@ -43,6 +47,7 @@ def render():
     st.divider()
     if st.button("Reset All Settings to Defaults", type="secondary"):
         reset_all_settings()
+        add_system_audit_entry("CONFIG_RESET", "All settings reset to defaults", _current_user())
         st.success("All settings reset to defaults.")
         st.rerun()
 
@@ -104,6 +109,13 @@ def _tab_underwriting():
         set_setting("min_property_value", int(min_prop))
         set_setting("min_heloc_amount", int(min_heloc))
         set_setting("max_heloc_amount", int(max_heloc))
+        add_system_audit_entry(
+            "CONFIG_CHANGE",
+            f"UW thresholds updated: FICO>={int(min_credit)}, CLTV<={max_cltv:.0f}%, "
+            f"DTI<={max_dti:.0f}%, PropVal>=${int(min_prop):,}, "
+            f"HELOC ${int(min_heloc):,}-${int(max_heloc):,}",
+            _current_user(),
+        )
         st.success("Underwriting thresholds saved.")
         st.rerun()
 
@@ -157,6 +169,11 @@ def _tab_underwriting():
 
     if save_tiers:
         set_setting("credit_tiers", updated_tiers)
+        tier_summary = ", ".join(
+            f"{t['label']} ({t['min_score']}-{t['max_score']}): {t['rate_adjustment']:+.2f}%"
+            for t in updated_tiers
+        )
+        add_system_audit_entry("CONFIG_CHANGE", f"Credit tiers updated: {tier_summary}", _current_user())
         st.success("Credit tiers and rate adjustments saved. "
                    "Changes will apply to the next pricing calculation.")
         st.rerun()
@@ -221,6 +238,13 @@ def _tab_pricing():
         set_setting("rate_floor", float(floor))
         set_setting("rate_ceiling", float(ceiling))
         set_setting("rate_lock_days", int(lock_days))
+        add_system_audit_entry(
+            "CONFIG_CHANGE",
+            f"Base rates updated: Prime={prime:.2f}%, Margin={margin:.2f}%, "
+            f"Autopay disc={autopay:.2f}%, Floor={floor:.2f}%, "
+            f"Ceiling={ceiling:.2f}%, Lock={int(lock_days)}d",
+            _current_user(),
+        )
         st.success("Base rate settings saved.")
         st.rerun()
 
@@ -256,6 +280,10 @@ def _tab_pricing():
 
     if save_ltv:
         set_setting("ltv_adjustments", updated_ltv)
+        ltv_summary = ", ".join(
+            f"<={t['max_ltv']:.0%}: {t['adjustment']:+.2f}%" for t in updated_ltv
+        )
+        add_system_audit_entry("CONFIG_CHANGE", f"LTV adjustments updated: {ltv_summary}", _current_user())
         st.success("LTV adjustments saved.")
         st.rerun()
 
@@ -284,6 +312,10 @@ def _tab_pricing():
 
     if save_amt:
         set_setting("amount_adjustments", updated_amt)
+        amt_summary = ", ".join(
+            f">=${t['min_amount']:,}: {t['adjustment']:+.2f}%" for t in updated_amt
+        )
+        add_system_audit_entry("CONFIG_CHANGE", f"Amount adjustments updated: {amt_summary}", _current_user())
         st.success("Amount adjustments saved.")
         st.rerun()
 
@@ -328,20 +360,30 @@ def _tab_lender():
 
 def _tab_audit():
     st.subheader("System Audit Log")
-    entries = get_full_audit_log()
 
-    if not entries:
+    # Merge application-level and system-level audit entries into one view.
+    app_entries = get_full_audit_log()
+    sys_entries = get_system_audit_log()
+
+    # Normalize system entries to match the app entry format
+    for e in sys_entries:
+        e["application_number"] = "SYSTEM"
+
+    all_entries = app_entries + sys_entries
+    all_entries.sort(key=lambda e: e.get("performed_at", ""), reverse=True)
+
+    if not all_entries:
         st.info("No audit entries yet.")
         return
 
-    st.caption(f"{len(entries)} total entries")
+    st.caption(f"{len(all_entries)} total entries")
 
-    actions = sorted(set(e["action"] for e in entries))
+    actions = sorted(set(e["action"] for e in all_entries))
     action_filter = st.multiselect("Filter by Action", actions)
 
-    filtered = entries
+    filtered = all_entries
     if action_filter:
-        filtered = [e for e in entries if e["action"] in action_filter]
+        filtered = [e for e in all_entries if e["action"] in action_filter]
 
     rows = []
     for e in filtered[:200]:

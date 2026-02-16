@@ -485,6 +485,31 @@ def add_audit_entry(application_id: int, action: str, details: str = "", perform
     conn.close()
 
 
+def add_system_audit_entry(action: str, details: str = "", performed_by: str = ""):
+    """Log a system-level event (not tied to a specific application).
+
+    Inserts into the separate system_audit_log table.
+    """
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO system_audit_log (action, details, performed_by, performed_at)
+           VALUES (?, ?, ?, ?)""",
+        (action, details, performed_by, now_utc()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_system_audit_log() -> list[dict]:
+    """Get all system-level audit entries."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM system_audit_log ORDER BY performed_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def get_audit_log(application_id: int) -> list[dict]:
     conn = get_connection()
     rows = conn.execute(
@@ -496,12 +521,12 @@ def get_audit_log(application_id: int) -> list[dict]:
 
 
 def get_full_audit_log() -> list[dict]:
-    """Get all audit entries across all applications."""
+    """Get all audit entries across all applications and system events."""
     conn = get_connection()
     rows = conn.execute(
-        """SELECT al.*, a.application_number
+        """SELECT al.*, COALESCE(a.application_number, 'SYSTEM') AS application_number
            FROM audit_log al
-           JOIN applications a ON a.id = al.application_id
+           LEFT JOIN applications a ON a.id = al.application_id
            ORDER BY al.performed_at DESC"""
     ).fetchall()
     conn.close()

@@ -309,6 +309,14 @@ def init_db():
         )""",
         "CREATE INDEX IF NOT EXISTS idx_audit_app ON audit_log(application_id)",
 
+        """CREATE TABLE IF NOT EXISTS system_audit_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            action          TEXT    NOT NULL,
+            details         TEXT    NOT NULL DEFAULT '',
+            performed_by    TEXT    NOT NULL DEFAULT '',
+            performed_at    TEXT    NOT NULL
+        )""",
+
         """CREATE TABLE IF NOT EXISTS settings (
             key     TEXT PRIMARY KEY,
             value   TEXT NOT NULL,
