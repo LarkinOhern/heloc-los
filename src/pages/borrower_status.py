@@ -15,6 +15,10 @@ PROGRESS_STEPS = ["SUBMITTED", "IN_REVIEW", "UNDERWRITING", "APPROVED", "CLOSING
 
 def render():
     st.header("Application Status")
+    st.caption(
+        "Track the progress of your HELOC application. Each step in the process "
+        "is shown below, along with a timeline of all activity on your file."
+    )
     email = st.session_state.get("borrower_email", "")
     if not email:
         st.warning("Enter your email in the sidebar.")

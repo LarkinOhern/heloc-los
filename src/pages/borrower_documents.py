@@ -14,6 +14,11 @@ from src.documents.generator import OUTPUT_DIR
 
 def render():
     st.header("Documents")
+    st.caption(
+        "Upload required documents to support your application and download any "
+        "disclosures or letters generated during the process. Document upload is "
+        "a stub in this prototype -- only the filename is recorded."
+    )
     email = st.session_state.get("borrower_email", "")
     if not email:
         st.warning("Enter your email in the sidebar.")

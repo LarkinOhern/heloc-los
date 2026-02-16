@@ -8,8 +8,8 @@ def render_auth_sidebar():
     """Render the role selector in the sidebar. Sets session_state keys."""
     st.sidebar.markdown(
         '<div style="text-align:center; padding:8px 0 4px;">'
-        '<span style="font-size:24px; font-weight:700; color:#1565c0;">HELOC</span>'
-        '<span style="font-size:24px; font-weight:300; color:#666;"> LOS</span>'
+        '<span style="font-size:24px; font-weight:700; color:#1565c0;">Equity</span>'
+        '<span style="font-size:24px; font-weight:700; color:#0d47a1;">Engine</span>'
         '</div>',
         unsafe_allow_html=True,
     )

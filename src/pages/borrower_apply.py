@@ -32,6 +32,10 @@ US_STATES = [
 
 def render():
     st.header("Apply for a HELOC")
+    st.caption(
+        "Complete each step below to submit your application. Your progress "
+        "is saved automatically -- close the browser and come back anytime."
+    )
     email = st.session_state.get("borrower_email", "")
     if not email:
         st.warning("Enter your email in the sidebar to begin.")
@@ -119,6 +123,10 @@ def _pick_or_create_application(email: str):
 
 def _step_property(app: dict):
     st.subheader("Property Information")
+    st.caption(
+        "Tell us about the property securing this HELOC. We use the property value "
+        "and your existing mortgage balance to calculate your available equity."
+    )
 
     with st.form("property_form"):
         property_type = st.selectbox(
@@ -202,6 +210,10 @@ def _step_property(app: dict):
 
 def _step_borrower(app: dict):
     st.subheader("Primary Borrower Information")
+    st.caption(
+        "We need some basic information about you. Your credit score is self-reported "
+        "for this prototype -- a production system would pull it from a credit bureau."
+    )
 
     borrowers = get_borrowers(app["id"])
     primary = next((b for b in borrowers if b["is_primary"]), None)
@@ -278,7 +290,10 @@ def _step_borrower(app: dict):
 
 def _step_coborrower(app: dict):
     st.subheader("Co-Borrower Information (Optional)")
-    st.caption("Adding a co-borrower can combine income for qualification.")
+    st.caption(
+        "Adding a co-borrower combines household income for qualification purposes "
+        "and may help you qualify for a larger credit line or better rate."
+    )
 
     borrowers = get_borrowers(app["id"])
     coborrower = next((b for b in borrowers if not b["is_primary"]), None)
@@ -371,6 +386,11 @@ def _step_coborrower(app: dict):
 
 def _step_employment(app: dict):
     st.subheader("Employment & Income")
+    st.caption(
+        "List all income sources for each borrower. Stable, verifiable income "
+        "strengthens your application. Include salary, self-employment, retirement, "
+        "and any other recurring income."
+    )
 
     borrowers = get_borrowers(app["id"])
 
@@ -453,6 +473,10 @@ def _step_employment(app: dict):
 
 def _step_assets_debts(app: dict):
     st.subheader("Assets & Debts")
+    st.caption(
+        "List your financial accounts and monthly obligations. We use this to "
+        "calculate your debt-to-income ratio (DTI), a key factor in underwriting."
+    )
 
     borrowers = get_borrowers(app["id"])
     primary = next((b for b in borrowers if b["is_primary"]), None)
@@ -543,6 +567,10 @@ def _step_assets_debts(app: dict):
 
 def _step_review_submit(app: dict):
     st.subheader("Review Your Application")
+    st.caption(
+        "Please review all information below before submitting. After submission, "
+        "you'll receive an initial disclosure and can track your application status."
+    )
 
     # Refresh app data
     app = get_application(app["id"])
