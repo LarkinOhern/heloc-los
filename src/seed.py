@@ -249,13 +249,13 @@ def _run_uw_and_pricing(app_data, employee):
         app_data["app_id"], decision=result.decision, ltv=result.ltv,
         cltv=result.cltv, dti=result.dti, highest_credit_score=result.highest_credit_score,
         reasons=json.dumps(result.hard_fails + result.warnings),
-        conditions=json.dumps(result.conditions), decided_by=employee,
+        conditions=json.dumps(result.conditions), decided_by=f"UW_ENGINE:{employee}",
     )
 
     # Auto-create conditions
     if result.conditions:
         for c in result.conditions:
-            create_condition(app_data["app_id"], condition_type="PRIOR_TO_CLOSING",
+            create_condition(app_data["app_id"], condition_type="INTERNAL_REVIEW",
                              description=c, added_by="UW_ENGINE")
 
     status_map = {"APPROVE": "APPROVED", "APPROVE_WITH_CONDITIONS": "APPROVED_WITH_CONDITIONS",
@@ -285,6 +285,8 @@ def _run_uw_and_pricing(app_data, employee):
         rate_locked=True, lock_date=now_utc(),
         lock_expiration=(datetime.utcnow() + timedelta(days=60)).isoformat(),
         locked_by=employee,
+        fico_tier=pricing.fico_tier, ltv_tier=pricing.ltv_tier,
+        amount_tier=pricing.amount_tier,
     )
     add_audit_entry(app_data["app_id"], "PRICING_CALCULATED",
                     f"Rate: {pricing.final_rate:.3f}%", employee)
@@ -308,7 +310,7 @@ def _run_uw_only(app_data, employee):
         app_data["app_id"], decision=result.decision, ltv=result.ltv,
         cltv=result.cltv, dti=result.dti, highest_credit_score=result.highest_credit_score,
         reasons=json.dumps(result.hard_fails + result.warnings),
-        conditions=json.dumps(result.conditions), decided_by=employee,
+        conditions=json.dumps(result.conditions), decided_by=f"UW_ENGINE:{employee}",
     )
 
     status_map = {"APPROVE": "APPROVED", "APPROVE_WITH_CONDITIONS": "APPROVED_WITH_CONDITIONS",

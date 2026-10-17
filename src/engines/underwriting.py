@@ -137,8 +137,10 @@ def run_underwriting(inp: UnderwritingInput) -> UnderwritingOutput:
         out.decision = "DENY"
     elif out.warnings:
         out.decision = "APPROVE_WITH_CONDITIONS"
+        # Worded for staff: these become internal review items, never
+        # borrower-facing conditions (finding C-05).
         out.conditions = [
-            f"Review required: {w}" for w in out.warnings
+            f"Underwriter review: {w}" for w in out.warnings
         ]
     else:
         out.decision = "APPROVE"
