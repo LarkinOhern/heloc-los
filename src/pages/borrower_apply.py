@@ -22,6 +22,13 @@ from src.utils.formatters import fmt_currency, fmt_date, now_utc
 
 STEPS = ["Property", "Borrower", "Co-Borrower", "Employment", "Assets & Debts", "Review & Submit"]
 
+CITIZENSHIP_OPTIONS = ["US_CITIZEN", "PERMANENT_RESIDENT", "NON_PERMANENT_RESIDENT"]
+CITIZENSHIP_LABELS = {
+    "US_CITIZEN": "U.S. citizen",
+    "PERMANENT_RESIDENT": "Permanent resident",
+    "NON_PERMANENT_RESIDENT": "Non-permanent resident",
+}
+
 US_STATES = [
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
     "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
@@ -39,6 +46,20 @@ def render():
     email = st.session_state.get("borrower_email", "")
     if not email:
         st.warning("Enter your email in the sidebar to begin.")
+        return
+
+    # ── Just submitted: keep the confirmation on screen ─────────────────────
+    # The success message used to vanish on the next click, which dropped the
+    # borrower on a blank "start a new application" page (finding O-01).
+    done = st.session_state.get("just_submitted")
+    if done and done[0] == email and "app_id" not in st.session_state:
+        st.success(
+            f"Application **{done[1]}** was submitted. Track it on the **Status** "
+            f"page. Your initial disclosure is under **Documents**."
+        )
+        if st.button("Start another application"):
+            st.session_state.pop("just_submitted", None)
+            st.rerun()
         return
 
     # ── Resume or start new ──────────────────────────────────────────────────
@@ -62,15 +83,19 @@ def render():
 
     # ── Step navigation ──────────────────────────────────────────────────────
     step = st.session_state.get("wizard_step", 0)
+    reachable = max(step, first_open_step(app))
 
-    # Progress bar
+    # Progress bar. Any step up to the first unfinished one is a button, so a
+    # returning borrower can jump straight to where they were (finding F-06).
     cols = st.columns(len(STEPS))
     for i, label in enumerate(STEPS):
-        marker = "**>>> " + label + " <<<**" if i == step else label
-        if i < step:
-            cols[i].success(label)
-        elif i == step:
+        if i == step:
             cols[i].info(f"**{label}**")
+        elif i <= reachable:
+            if cols[i].button(f"✓ {label}" if i < reachable else label,
+                              key=f"goto_step_{i}", use_container_width=True):
+                st.session_state["wizard_step"] = i
+                st.rerun()
         else:
             cols[i].write(label)
 
@@ -91,7 +116,42 @@ def render():
         _step_review_submit(app)
 
 
+# ── Add-forms that start empty after each add ─────────────────────────────────
+
+def _form_version(name: str) -> int:
+    """Version number baked into an add-form's widget keys.
+
+    Bumping it after a successful add gives the next render brand-new, empty
+    widgets, so a second click can't re-add the same entry (finding F-05).
+    A failed validation keeps the version, so the borrower's input stays put.
+    """
+    return st.session_state.get(f"_formv_{name}", 0)
+
+
+def _bump_form(name: str):
+    st.session_state[f"_formv_{name}"] = _form_version(name) + 1
+
+
 # ── Pick / Create Application ────────────────────────────────────────────────
+
+def first_open_step(app: dict) -> int:
+    """The first wizard step that still needs input, used when resuming.
+
+    Co-borrower and assets/debts are optional, so a draft with income on file
+    resumes at Assets & Debts, and one with assets or debts at Review.
+    """
+    if not (app["property_address"] and app["property_value"] > 0
+            and app["heloc_amount_requested"] > 0):
+        return 0
+    primary = next((b for b in get_borrowers(app["id"]) if b["is_primary"]), None)
+    if not primary or not primary["first_name"]:
+        return 1
+    if not get_employment(primary["id"]):
+        return 2
+    if not get_assets(primary["id"]) and not get_debts(primary["id"]):
+        return 4
+    return 5
+
 
 def _pick_or_create_application(email: str):
     existing = get_applications_by_email(email)
@@ -105,7 +165,7 @@ def _pick_or_create_application(email: str):
             col2.write(f"Created: {fmt_date(d['created_at'])}")
             if col3.button("Resume", key=f"resume_{d['id']}"):
                 st.session_state["app_id"] = d["id"]
-                st.session_state["wizard_step"] = 0
+                st.session_state["wizard_step"] = first_open_step(d)
                 st.rerun()
         st.divider()
 
@@ -244,11 +304,10 @@ def _step_borrower(app: dict):
 
         citizenship = st.selectbox(
             "Citizenship Status",
-            ["US_CITIZEN", "PERMANENT_RESIDENT", "NON_PERMANENT_RESIDENT"],
-            format_func=lambda x: x.replace("_", " ").title(),
-            index=["US_CITIZEN", "PERMANENT_RESIDENT", "NON_PERMANENT_RESIDENT"].index(
-                primary.get("citizenship", "US_CITIZEN")
-            ) if primary.get("citizenship") in ["US_CITIZEN", "PERMANENT_RESIDENT", "NON_PERMANENT_RESIDENT"] else 0,
+            CITIZENSHIP_OPTIONS,
+            format_func=CITIZENSHIP_LABELS.get,
+            index=CITIZENSHIP_OPTIONS.index(primary["citizenship"])
+            if primary.get("citizenship") in CITIZENSHIP_OPTIONS else 0,
         )
 
         col_back, col_next = st.columns(2)
@@ -330,11 +389,10 @@ def _step_coborrower(app: dict):
 
             citizenship = st.selectbox(
                 "Citizenship Status",
-                ["US_CITIZEN", "PERMANENT_RESIDENT", "NON_PERMANENT_RESIDENT"],
-                format_func=lambda x: x.replace("_", " ").title(),
-                index=["US_CITIZEN", "PERMANENT_RESIDENT", "NON_PERMANENT_RESIDENT"].index(
-                    cb.get("citizenship", "US_CITIZEN")
-                ) if cb.get("citizenship") in ["US_CITIZEN", "PERMANENT_RESIDENT", "NON_PERMANENT_RESIDENT"] else 0,
+                CITIZENSHIP_OPTIONS,
+                format_func=CITIZENSHIP_LABELS.get,
+                index=CITIZENSHIP_OPTIONS.index(cb["citizenship"])
+                if cb.get("citizenship") in CITIZENSHIP_OPTIONS else 0,
             )
 
             col_back, col_next = st.columns(2)
@@ -414,31 +472,34 @@ def _step_employment(app: dict):
                     st.rerun()
 
         # Add new employment
-        with st.form(f"emp_form_{b['id']}"):
+        v = _form_version(f"emp_{b['id']}")
+        with st.form(f"emp_form_{b['id']}_{v}"):
             st.caption("Add income source")
             col1, col2 = st.columns(2)
-            employer = col1.text_input("Employer Name", key=f"emp_name_{b['id']}")
-            position = col2.text_input("Position / Title", key=f"emp_pos_{b['id']}")
+            employer = col1.text_input("Employer Name", key=f"emp_name_{b['id']}_{v}")
+            position = col2.text_input("Position / Title", key=f"emp_pos_{b['id']}_{v}")
 
             col1, col2, col3 = st.columns(3)
             income_type = col1.selectbox(
                 "Income Type",
                 ["SALARY", "HOURLY", "SELF_EMPLOYED", "RETIREMENT", "OTHER"],
                 format_func=lambda x: x.replace("_", " ").title(),
-                key=f"emp_type_{b['id']}",
+                key=f"emp_type_{b['id']}_{v}",
             )
             monthly_income = col2.number_input(
                 "Monthly Income ($)", min_value=0.0, step=500.0,
-                key=f"emp_income_{b['id']}",
+                key=f"emp_income_{b['id']}_{v}",
             )
             years = col3.number_input(
                 "Years Employed", min_value=0.0, step=0.5,
-                key=f"emp_years_{b['id']}",
+                key=f"emp_years_{b['id']}_{v}",
             )
 
             add_emp = st.form_submit_button(f"Add Income for {b['first_name']}")
 
-        if add_emp and employer.strip() and monthly_income > 0:
+        if add_emp and not (employer.strip() and monthly_income > 0):
+            st.error("Enter an employer name and a monthly income above $0 to add this income source.")
+        elif add_emp:
             create_employment(
                 b["id"],
                 employer_name=employer.strip(),
@@ -447,6 +508,7 @@ def _step_employment(app: dict):
                 monthly_income=monthly_income,
                 income_type=income_type,
             )
+            _bump_form(f"emp_{b['id']}")
             st.rerun()
 
         st.divider()
@@ -499,20 +561,26 @@ def _step_assets_debts(app: dict):
             delete_asset(asset["id"])
             st.rerun()
 
-    with st.form("asset_form"):
+    av = _form_version("asset")
+    with st.form(f"asset_form_{av}"):
         st.caption("Add asset account")
         col1, col2, col3 = st.columns(3)
         acct_type = col1.selectbox(
             "Account Type",
             ["CHECKING", "SAVINGS", "INVESTMENT", "RETIREMENT", "OTHER"],
             format_func=lambda x: x.title(),
+            key=f"asset_type_{av}",
         )
-        institution = col2.text_input("Financial Institution")
-        balance = col3.number_input("Balance ($)", min_value=0.0, step=1000.0)
+        institution = col2.text_input("Financial Institution", key=f"asset_inst_{av}")
+        balance = col3.number_input("Balance ($)", min_value=0.0, step=1000.0,
+                                    key=f"asset_bal_{av}")
         add_asset = st.form_submit_button("Add Asset")
 
-    if add_asset and institution.strip() and balance > 0:
+    if add_asset and not (institution.strip() and balance > 0):
+        st.error("Enter the institution and a balance above $0 to add this account.")
+    elif add_asset:
         create_asset(bid, account_type=acct_type, institution=institution.strip(), balance=balance)
+        _bump_form("asset")
         st.rerun()
 
     st.divider()
@@ -530,25 +598,32 @@ def _step_assets_debts(app: dict):
             delete_debt(debt["id"])
             st.rerun()
 
-    with st.form("debt_form"):
+    dv = _form_version("debt")
+    with st.form(f"debt_form_{dv}"):
         st.caption("Add monthly obligation")
         col1, col2 = st.columns(2)
         debt_type = col1.selectbox(
             "Debt Type",
             ["MORTGAGE", "AUTO", "STUDENT", "CREDIT_CARD", "PERSONAL", "OTHER"],
             format_func=lambda x: x.replace("_", " ").title(),
+            key=f"debt_type_{dv}",
         )
-        creditor = col2.text_input("Creditor Name")
+        creditor = col2.text_input("Creditor Name", key=f"debt_cred_{dv}")
         col1, col2 = st.columns(2)
-        monthly_payment = col1.number_input("Monthly Payment ($)", min_value=0.0, step=100.0)
-        debt_balance = col2.number_input("Outstanding Balance ($)", min_value=0.0, step=1000.0)
+        monthly_payment = col1.number_input("Monthly Payment ($)", min_value=0.0, step=100.0,
+                                            key=f"debt_pmt_{dv}")
+        debt_balance = col2.number_input("Outstanding Balance ($)", min_value=0.0, step=1000.0,
+                                         key=f"debt_bal_{dv}")
         add_debt = st.form_submit_button("Add Debt")
 
-    if add_debt and creditor.strip() and monthly_payment > 0:
+    if add_debt and not (creditor.strip() and monthly_payment > 0):
+        st.error("Enter the creditor and a monthly payment above $0 to add this debt.")
+    elif add_debt:
         create_debt(
             bid, debt_type=debt_type, creditor=creditor.strip(),
             monthly_payment=monthly_payment, balance=debt_balance,
         )
+        _bump_form("debt")
         st.rerun()
 
     st.divider()
@@ -669,5 +744,8 @@ def _step_review_submit(app: dict):
             )
             st.success(f"Application **{app['application_number']}** submitted successfully!")
             st.balloons()
+            st.session_state["just_submitted"] = (
+                st.session_state.get("borrower_email", ""), app["application_number"],
+            )
             st.session_state.pop("app_id", None)
             st.session_state.pop("wizard_step", None)
