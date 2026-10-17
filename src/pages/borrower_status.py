@@ -8,6 +8,7 @@ from src.utils.db_helpers import (
     get_audit_log, get_conditions,
 )
 from src.utils.formatters import fmt_currency, fmt_date, fmt_datetime
+from src.utils.timeline import borrower_timeline
 
 # The "happy path" progression for the stepper display
 PROGRESS_STEPS = ["SUBMITTED", "IN_REVIEW", "UNDERWRITING", "APPROVED", "CLOSING", "FUNDED"]
@@ -17,7 +18,7 @@ def render():
     st.header("Application Status")
     st.caption(
         "Track the progress of your HELOC application. Each step in the process "
-        "is shown below, along with a timeline of all activity on your file."
+        "is shown below, along with a timeline of activity on your file."
     )
     email = st.session_state.get("borrower_email", "")
     if not email:
@@ -72,25 +73,30 @@ def _render_status(app: dict):
     col2.metric("Property Value", fmt_currency(app["property_value"]))
     col3.metric("Submitted", fmt_date(app["submitted_at"]))
 
-    # ── Conditions (if any) ──────────────────────────────────────────────
+    # ── Outstanding items (borrower-facing conditions only) ─────────────
     if status in ("APPROVED_WITH_CONDITIONS", "CLOSING"):
         conditions = get_conditions(app["id"])
-        open_conds = [c for c in conditions if c["status"] == "OPEN"]
+        open_conds = [c for c in conditions
+                      if c["status"] == "OPEN" and c["condition_type"] != "INTERNAL_REVIEW"]
         if open_conds:
             st.divider()
-            st.write("**Outstanding Conditions**")
+            st.write("**Outstanding items**")
+            st.caption("We need these before your loan can close. Upload documents on the Documents page.")
             for c in open_conds:
-                st.write(f"- {c['description']} ({c['condition_type'].replace('_', ' ').title()})")
+                st.write(f"- {c['description']}")
 
-    # ── Audit Timeline ───────────────────────────────────────────────────
+    # ── Timeline (borrower-safe view of the audit log) ──────────────────
     st.divider()
     st.write("**Activity Timeline**")
-    entries = get_audit_log(app["id"])
-    if entries:
-        for entry in entries:
+    items = borrower_timeline(get_audit_log(app["id"]))
+    if items:
+        for item in items:  # newest first, as get_audit_log returns them
             col1, col2 = st.columns([1, 3])
-            col1.caption(fmt_datetime(entry["performed_at"]))
-            col2.write(f"**{entry['action'].replace('_', ' ').title()}** — {entry['details']}")
+            col1.caption(fmt_datetime(item["when"]))
+            line = f"**{item['title']}**"
+            if item["detail"]:
+                line += f" — {item['detail']}"
+            col2.write(line)
     else:
         st.caption("No activity recorded yet.")
 
