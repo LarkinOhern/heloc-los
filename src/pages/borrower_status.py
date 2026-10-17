@@ -74,7 +74,9 @@ def _render_status(app: dict):
     col3.metric("Submitted", fmt_date(app["submitted_at"]))
 
     # ── Outstanding items (borrower-facing conditions only) ─────────────
-    if status in ("APPROVED_WITH_CONDITIONS", "CLOSING"):
+    # Any active file can have open requests: an officer may add one after a
+    # clean approval (finding N-03).
+    if status not in ("DENIED", "WITHDRAWN", "FUNDED"):
         conditions = get_conditions(app["id"])
         open_conds = [c for c in conditions
                       if c["status"] == "OPEN" and c["condition_type"] != "INTERNAL_REVIEW"]

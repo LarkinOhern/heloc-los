@@ -6,6 +6,7 @@ instead (finding C-01). Anything not listed here stays internal.
 """
 
 import re
+from datetime import date
 
 from src.config import STATUS_LABELS
 
@@ -53,7 +54,7 @@ def _rate_item(details: str) -> dict:
     if rate:
         parts.append(f"Your rate of {rate.group(1)} is locked")
     if exp:
-        parts.append(f"until {exp.group(1)}")
+        parts.append(f"until {date.fromisoformat(exp.group(1)).strftime('%b %d, %Y')}")
     return {"title": "Rate locked", "detail": " ".join(parts) + "." if parts else ""}
 
 
