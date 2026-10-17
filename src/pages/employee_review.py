@@ -9,7 +9,7 @@ import streamlit as st
 
 from src.config import (
     STATUS_LABELS, STATUS_COLORS, VALID_TRANSITIONS,
-    PROPERTY_TYPE_LABELS, REQUIRED_DOCUMENTS,
+    PROPERTY_TYPE_LABELS, REQUIRED_DOCUMENTS, EMPLOYEES,
 )
 from src.utils.db_helpers import (
     get_application, get_all_applications, get_borrowers,
@@ -25,12 +25,21 @@ from src.config_manager import get_setting
 from src.engines.underwriting import UnderwritingInput, run_underwriting
 from src.engines.pricing import PricingInput, calculate_pricing, amount_tier_label
 from src.engines.workflow import blocking_conditions
+from src.utils.permissions import can_work, read_only_reason, current_actor
 from src.utils.styles import status_badge
 from src.documents.generator import generate_decision_letter, generate_closing_documents
 from src.utils.formatters import (
     fmt_currency, fmt_date, fmt_datetime, fmt_percent, fmt_rate, now_utc,
-    utcnow, days_remaining,
+    utcnow, days_remaining, md_escape,
 )
+
+
+def decided_by_label(decided_by: str) -> str:
+    """Engine decisions are stored as "UW_ENGINE:<user who ran it>" (C-07)."""
+    if decided_by.startswith("UW_ENGINE"):
+        runner = decided_by.partition(":")[2]
+        return f"Rules engine (run by {runner})" if runner else "Rules engine"
+    return decided_by
 
 
 def render():
@@ -118,9 +127,10 @@ def _render_status_bar(app: dict):
 
     # Assignment
     assigned = app["assigned_employee"]
+    _, role = current_actor()
     if assigned:
         col2.write(f"Assigned to: **{assigned}**")
-    else:
+    elif role in ("Loan Officer", "Admin"):
         if col2.button("Assign to Me"):
             update_application(app["id"], assigned_employee=current_user)
             add_audit_entry(
@@ -128,6 +138,23 @@ def _render_status_bar(app: dict):
                 f"Assigned to {current_user}", current_user,
             )
             st.rerun()
+
+    if role == "Admin":
+        officers = [e["username"] for e in EMPLOYEES if e["role"] == "Loan Officer"]
+        target = col2.selectbox("Reassign to", officers, key="reassign_to",
+                                index=officers.index(assigned) if assigned in officers else 0)
+        if col2.button("Reassign") and target != assigned:
+            update_application(app["id"], assigned_employee=target)
+            add_audit_entry(app["id"], "ASSIGNED",
+                            f"Reassigned from {assigned or 'unassigned'} to {target}",
+                            current_user)
+            st.rerun()
+
+    # Only the assigned officer (or an admin) may change the file (C-02).
+    reason = read_only_reason(app)
+    if reason:
+        col3.info(reason)
+        return
 
     # Status change — only show valid transitions
     allowed = VALID_TRANSITIONS.get(status, [])
@@ -141,7 +168,7 @@ def _render_status_bar(app: dict):
         if new_status and col3.button("Update Status"):
             blockers = blocking_conditions(new_status, get_conditions(app["id"]))
             if blockers:
-                listed = "".join(f"\n- {c['description']}" for c in blockers)
+                listed = "".join(f"\n- {md_escape(c['description'])}" for c in blockers)
                 st.error(
                     f"Resolve these open conditions before moving to "
                     f"{STATUS_LABELS.get(new_status, new_status)}:{listed}"
@@ -293,7 +320,7 @@ def _tab_underwriting(app: dict):
     # Only enable if the application is in a status where UW makes sense.
     # We check UNDERWRITING specifically but also allow IN_REVIEW since
     # an employee might want to pre-check before formally moving to UW.
-    can_run = app["status"] in ("IN_REVIEW", "UNDERWRITING")
+    can_run = app["status"] in ("IN_REVIEW", "UNDERWRITING") and can_work(app)
 
     if can_run:
         if st.button("Run Underwriting Engine", type="primary"):
@@ -331,15 +358,15 @@ def _tab_underwriting(app: dict):
         if reasons:
             st.write("**Reasons:**")
             for r in reasons:
-                st.write(f"- {r}")
+                st.write(f"- {md_escape(r)}")
 
         conditions = json.loads(dec["conditions"]) if dec["conditions"] else []
         if conditions:
             st.write("**Conditions:**")
             for c in conditions:
-                st.write(f"- {c}")
+                st.write(f"- {md_escape(c)}")
 
-        st.caption(f"Decided by: {dec['decided_by']}")
+        st.caption(f"Decided by: {decided_by_label(dec['decided_by'])}")
         st.divider()
 
 
@@ -385,15 +412,16 @@ def _execute_underwriting(app: dict, current_user: str):
         highest_credit_score=result.highest_credit_score,
         reasons=json.dumps(all_reasons),
         conditions=json.dumps(result.conditions),
-        decided_by=current_user,
+        decided_by=f"UW_ENGINE:{current_user}",
     )
 
-    # Auto-create condition records for APPROVE_WITH_CONDITIONS
+    # Engine warnings become internal review items: the officer must clear
+    # them, but the borrower never sees them (C-05).
     if result.decision == "APPROVE_WITH_CONDITIONS":
         for cond_text in result.conditions:
             create_condition(
                 app["id"],
-                condition_type="PRIOR_TO_CLOSING",
+                condition_type="INTERNAL_REVIEW",
                 description=cond_text,
                 added_by="UW_ENGINE",
             )
@@ -466,7 +494,8 @@ def _tab_pricing(app: dict):
     # Pricing requires a UW decision first so we have the credit score
     # and CLTV. Check if there's at least one decision on file.
     decisions = get_underwriting_decisions(app["id"])
-    can_price = bool(decisions) and app["status"] not in ("DRAFT", "SUBMITTED", "DENIED", "WITHDRAWN")
+    can_price = (bool(decisions) and can_work(app)
+                 and app["status"] not in ("DRAFT", "SUBMITTED", "DENIED", "WITHDRAWN"))
 
     if can_price:
         if st.button("Calculate Pricing", type="primary"):
@@ -487,7 +516,12 @@ def _tab_pricing(app: dict):
 
         # Look up which tier each adjustment came from so the employee
         # can explain exactly why the borrower got this rate.
-        fico_tier, ltv_tier, amount_tier = _match_pricing_tiers(lock)
+        # Prefer the labels saved at pricing time (F-09); older rows predate
+        # those columns, so fall back to matching adjustments to tiers.
+        if lock.get("amount_tier"):
+            fico_tier, ltv_tier, amount_tier = lock["fico_tier"], lock["ltv_tier"], lock["amount_tier"]
+        else:
+            fico_tier, ltv_tier, amount_tier = _match_pricing_tiers(lock)
 
         # Rate breakdown table — shows every component with tier context.
         col1, col2, col3 = st.columns([2, 1.5, 2])
@@ -509,7 +543,7 @@ def _tab_pricing(app: dict):
             c1, c2, c3 = st.columns([2, 1.5, 2])
             c1.write(label)
             c2.write(value)
-            c3.write(tier)
+            c3.write(md_escape(tier))
 
         st.divider()
         col1, col2 = st.columns(2)
@@ -533,7 +567,7 @@ def _tab_pricing(app: dict):
                     f"Re-calculate pricing and lock a new rate."
                 )
         else:
-            if st.button("Lock This Rate", key=f"lock_{lock['id']}"):
+            if can_work(app) and st.button("Lock This Rate", key=f"lock_{lock['id']}"):
                 _lock_rate(app, lock, current_user)
                 st.rerun()
 
@@ -567,6 +601,9 @@ def _execute_pricing(app: dict, latest_decision: dict, current_user: str):
         monthly_payment=result.monthly_payment,
         rate_locked=False,
         locked_by=current_user,
+        fico_tier=result.fico_tier,
+        ltv_tier=result.ltv_tier,
+        amount_tier=result.amount_tier,
     )
     add_audit_entry(
         app["id"], "PRICING_CALCULATED",
