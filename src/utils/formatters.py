@@ -77,3 +77,26 @@ def days_remaining(expiration_iso: str, now: datetime | None = None) -> int:
     now = now or utcnow()
     seconds = (datetime.fromisoformat(expiration_iso) - now).total_seconds()
     return max(0, math.ceil(seconds / 86400))
+
+
+def md_escape(text) -> str:
+    """Escape text for st.write / st.markdown.
+
+    Streamlit treats anything between two "$" signs as LaTeX math, so a line
+    like "Monthly debts: $2,000 vs. income: $5,000" lost its dollar signs and
+    turned italic (finding N-01). Escape them whenever text is dynamic.
+    """
+    return str(text).replace("$", "\\$")
+
+
+def describe_changes(changes: dict) -> str:
+    """'Label: old → new' for each changed setting, joined with '; '.
+
+    ``changes`` maps a label to a (before, after) pair of display strings.
+    Unchanged settings are left out, so the audit log says what moved.
+    """
+    return "; ".join(
+        f"{label}: {before} → {after}"
+        for label, (before, after) in changes.items()
+        if before != after
+    )
