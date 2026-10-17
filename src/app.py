@@ -121,12 +121,18 @@ through each step, and you can save your progress and come back anytime.
         st.rerun()
 
 
-def _get_nav_default(options: list[str]) -> int:
-    """Check for a pending navigation request and return the index to default to."""
+def _nav_radio(options: list[str], key: str) -> str:
+    """Sidebar navigation that honours a pending jump (e.g. pipeline -> Review).
+
+    The jump is applied by writing the radio's own session-state key before the
+    widget is created. That marks the value as set server-side, so the browser
+    updates its copy too. Changing ``index`` instead left the browser holding
+    the old page and sending it back on the next click (finding F-01).
+    """
     target = st.session_state.pop("_pending_nav", None)
-    if target and target in options:
-        return options.index(target)
-    return 0
+    if target in options:
+        st.session_state[key] = target
+    return st.sidebar.radio("Navigation", options, key=key)
 
 
 # ── Borrower Pages ───────────────────────────────────────────────────────────
@@ -150,12 +156,7 @@ if role == "Borrower":
 # ── Loan Officer Pages ──────────────────────────────────────────────────────
 elif role == "Loan Officer":
     lo_options = ["Pipeline", "Review Application", "Conditions"]
-    page = st.sidebar.radio(
-        "Navigation",
-        lo_options,
-        index=_get_nav_default(lo_options),
-        key="lo_nav",
-    )
+    page = _nav_radio(lo_options, key="lo_nav")
     st.sidebar.caption(
         f"Logged in as: {st.session_state.get('employee_display_name', '')}"
     )
@@ -169,12 +170,7 @@ elif role == "Loan Officer":
 # ── Admin Pages ──────────────────────────────────────────────────────────────
 elif role == "Admin":
     admin_options = ["Pipeline", "Review Application", "Conditions", "Admin Config"]
-    page = st.sidebar.radio(
-        "Navigation",
-        admin_options,
-        index=_get_nav_default(admin_options),
-        key="admin_nav",
-    )
+    page = _nav_radio(admin_options, key="admin_nav")
     st.sidebar.caption(
         f"Logged in as: {st.session_state.get('employee_display_name', '')}"
     )
