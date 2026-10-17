@@ -335,8 +335,9 @@ def create_pricing_lock(application_id: int, **kwargs) -> int:
         """INSERT INTO pricing_locks
            (application_id, prime_rate, margin, fico_adjustment, ltv_adjustment,
             amount_adjustment, autopay_discount, final_rate, monthly_payment,
-            rate_locked, lock_date, lock_expiration, locked_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            rate_locked, lock_date, lock_expiration, locked_by,
+            fico_tier, ltv_tier, amount_tier)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             application_id,
             kwargs.get("prime_rate", 0),
@@ -351,6 +352,9 @@ def create_pricing_lock(application_id: int, **kwargs) -> int:
             kwargs.get("lock_date"),
             kwargs.get("lock_expiration"),
             kwargs.get("locked_by", ""),
+            kwargs.get("fico_tier", ""),
+            kwargs.get("ltv_tier", ""),
+            kwargs.get("amount_tier", ""),
         ),
     )
     lock_id = cur.lastrowid
@@ -375,8 +379,8 @@ def create_condition(application_id: int, **kwargs) -> int:
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO conditions
-           (application_id, condition_type, description, status, added_by, added_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           (application_id, condition_type, description, status, added_by, added_at, doc_type)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (
             application_id,
             kwargs.get("condition_type", "PRIOR_TO_CLOSING"),
@@ -384,6 +388,7 @@ def create_condition(application_id: int, **kwargs) -> int:
             kwargs.get("status", "OPEN"),
             kwargs.get("added_by", ""),
             now_utc(),
+            kwargs.get("doc_type"),
         ),
     )
     cond_id = cur.lastrowid

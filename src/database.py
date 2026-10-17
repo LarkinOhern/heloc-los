@@ -331,5 +331,24 @@ def init_db():
     for stmt in statements:
         cur.execute(stmt)
 
+    # Columns added after the first release. ALTER TABLE fails harmlessly when
+    # the column already exists, which keeps this safe to run on every start
+    # for both SQLite and Turso.
+    for table, column, decl in _ADDED_COLUMNS:
+        try:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        except Exception as e:  # sqlite3.OperationalError / libsql error
+            if "duplicate column" not in str(e).lower():
+                raise
+
     conn.commit()
     conn.close()
+
+
+_ADDED_COLUMNS = [
+    ("conditions", "doc_type", "TEXT"),          # document that satisfies it (C-06)
+    ("conditions", "resolution_note", "TEXT"),   # waiver reason / review note (C-04)
+    ("pricing_locks", "fico_tier", "TEXT NOT NULL DEFAULT ''"),    # F-09
+    ("pricing_locks", "ltv_tier", "TEXT NOT NULL DEFAULT ''"),
+    ("pricing_locks", "amount_tier", "TEXT NOT NULL DEFAULT ''"),
+]
