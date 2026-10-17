@@ -210,9 +210,11 @@ def _step_property(app: dict):
         address = st.text_input("Street Address", value=app["property_address"])
         col1, col2, col3 = st.columns(3)
         city = col1.text_input("City", value=app["property_city"])
+        # No default: an untouched dropdown used to save "AL" (finding N-05).
         state = col2.selectbox(
             "State", US_STATES,
-            index=US_STATES.index(app["property_state"]) if app["property_state"] in US_STATES else 0,
+            index=US_STATES.index(app["property_state"]) if app["property_state"] in US_STATES else None,
+            placeholder="Select a state",
         )
         zipcode = col3.text_input("ZIP Code", value=app["property_zip"])
 
@@ -248,6 +250,8 @@ def _step_property(app: dict):
             errors.append("Street address is required.")
         if not city.strip():
             errors.append("City is required.")
+        if not state:
+            errors.append("State is required.")
         if not zipcode.strip():
             errors.append("ZIP code is required.")
         if property_value < MIN_PROPERTY_VALUE:
