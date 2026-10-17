@@ -2,12 +2,12 @@
 
 import streamlit as st
 
-from src.config import STATUS_LABELS, STATUS_COLORS, STATUSES
+from src.config import STATUS_LABELS, STATUS_COLORS, STATUSES, REQUIRED_DOCUMENTS
 from src.utils.db_helpers import (
     get_applications_by_email, get_application, get_borrowers,
     get_audit_log, get_conditions,
 )
-from src.utils.formatters import fmt_currency, fmt_date, fmt_datetime
+from src.utils.formatters import fmt_currency, fmt_date, fmt_datetime, md_escape
 from src.utils.timeline import borrower_timeline
 
 # The "happy path" progression for the stepper display
@@ -82,8 +82,12 @@ def _render_status(app: dict):
             st.divider()
             st.write("**Outstanding items**")
             st.caption("We need these before your loan can close. Upload documents on the Documents page.")
+            doc_labels = {d["type"]: d["label"] for d in REQUIRED_DOCUMENTS}
             for c in open_conds:
-                st.write(f"- {c['description']}")
+                line = f"- {md_escape(c['description'])}"
+                if c.get("doc_type"):
+                    line += f" — upload your **{doc_labels.get(c['doc_type'], 'document')}** on the Documents page"
+                st.write(line)
 
     # ── Timeline (borrower-safe view of the audit log) ──────────────────
     st.divider()
@@ -95,7 +99,7 @@ def _render_status(app: dict):
             col1.caption(fmt_datetime(item["when"]))
             line = f"**{item['title']}**"
             if item["detail"]:
-                line += f" — {item['detail']}"
+                line += f" — {md_escape(item['detail'])}"
             col2.write(line)
     else:
         st.caption("No activity recorded yet.")

@@ -5,6 +5,7 @@ Each step saves to DB on "Next" so the borrower can resume later.
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src.config import (
     PROPERTY_TYPES, PROPERTY_TYPE_LABELS, MIN_HELOC_AMOUNT, MAX_HELOC_AMOUNT,
@@ -18,7 +19,7 @@ from src.utils.db_helpers import (
     delete_debt, add_audit_entry,
 )
 from src.documents.generator import generate_initial_disclosure
-from src.utils.formatters import fmt_currency, fmt_date, now_utc
+from src.utils.formatters import fmt_currency, fmt_date, now_utc, md_escape
 
 STEPS = ["Property", "Borrower", "Co-Borrower", "Employment", "Assets & Debts", "Review & Submit"]
 
@@ -100,6 +101,17 @@ def render():
             cols[i].write(label)
 
     st.divider()
+
+    # Bring the new step's heading into view; the page used to stay scrolled
+    # to where the previous step's button was (finding O-02).
+    if st.session_state.get("_last_step_shown") != step:
+        st.session_state["_last_step_shown"] = step
+        components.html(
+            "<script>const m = window.parent.document.querySelector("
+            "'section.stMain, section.main, [data-testid=stMain]');"
+            "if (m) m.scrollTo({top: 0}); window.parent.scrollTo({top: 0});</script>",
+            height=0,
+        )
 
     # Render the current step
     if step == 0:
@@ -295,10 +307,13 @@ def _step_borrower(app: dict):
         ssn4 = col1.text_input("Last 4 of SSN", value=primary["ssn_last4"], max_chars=4)
         dob = col2.text_input("Date of Birth (YYYY-MM-DD)", value=primary["date_of_birth"])
 
+        # Blank until the borrower enters it. Defaulting to 300 meant an
+        # untouched field submitted the lowest possible score (finding O-03).
         credit_score = st.number_input(
             "Self-Reported Credit Score",
             min_value=300, max_value=850, step=1,
-            value=max(primary["credit_score"], 300),
+            value=primary["credit_score"] or None,
+            placeholder="300–850",
             help="This is self-reported for the prototype. A real system would pull from a credit bureau.",
         )
 
@@ -326,6 +341,8 @@ def _step_borrower(app: dict):
             errors.append("Last name is required.")
         if not email.strip():
             errors.append("Email is required.")
+        if credit_score is None:
+            errors.append("Enter your credit score (300–850). An estimate is fine.")
 
         if errors:
             for e in errors:
@@ -384,7 +401,8 @@ def _step_coborrower(app: dict):
             credit_score = st.number_input(
                 "Self-Reported Credit Score",
                 min_value=300, max_value=850, step=1,
-                value=max(cb["credit_score"], 300),
+                value=cb["credit_score"] or None,
+                placeholder="300–850",
             )
 
             citizenship = st.selectbox(
@@ -409,6 +427,8 @@ def _step_coborrower(app: dict):
                 errors.append("Co-borrower first name is required.")
             if not last.strip():
                 errors.append("Co-borrower last name is required.")
+            if credit_score is None:
+                errors.append("Enter the co-borrower's credit score (300–850).")
 
             if errors:
                 for e in errors:
@@ -702,6 +722,18 @@ def _step_review_submit(app: dict):
         col1, col2 = st.columns(2)
         col1.metric("Total Assets", fmt_currency(sum(a["balance"] for a in assets)))
         col2.metric("Total Monthly Debts", fmt_currency(sum(d["monthly_payment"] for d in debts)))
+
+        # The mortgage balance is asked for twice; flag a mismatch (O-04).
+        mortgages = [d for d in debts if d["debt_type"] == "MORTGAGE"]
+        if mortgages:
+            listed = sum(d["balance"] for d in mortgages)
+            stated = app["existing_mortgage_balance"]
+            if abs(listed - stated) > max(1000, 0.02 * stated):
+                st.warning(md_escape(
+                    f"Your mortgage balance on the Property step ({fmt_currency(stated)}) "
+                    f"doesn't match the mortgage you listed under debts "
+                    f"({fmt_currency(listed)}). Go back and correct whichever is wrong."
+                ))
 
     st.divider()
 

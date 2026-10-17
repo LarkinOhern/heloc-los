@@ -6,7 +6,7 @@ import streamlit as st
 from src.config import REQUIRED_DOCUMENTS
 from src.utils.db_helpers import (
     get_applications_by_email, get_documents, create_document,
-    get_generated_documents,
+    get_generated_documents, get_conditions, add_audit_entry,
 )
 from src.utils.formatters import fmt_datetime
 from src.documents.generator import OUTPUT_DIR
@@ -47,10 +47,15 @@ def render():
 
     existing_docs = get_documents(app["id"])
     uploaded_types = {d["doc_type"] for d in existing_docs}
+    # Documents an open condition is waiting on (C-06).
+    requested = {c["doc_type"] for c in get_conditions(app["id"])
+                 if c["status"] == "OPEN" and c.get("doc_type")}
 
     for req in REQUIRED_DOCUMENTS:
         col1, col2, col3 = st.columns([3, 2, 1])
         col1.write(req["label"])
+        if req["type"] in requested and req["type"] not in uploaded_types:
+            col1.caption(":orange[**Requested** by your loan officer]")
 
         if req["type"] in uploaded_types:
             doc = next(d for d in existing_docs if d["doc_type"] == req["type"])
@@ -69,6 +74,8 @@ def render():
                     filename=uploaded_file.name,
                     uploaded_by=email,
                 )
+                add_audit_entry(app["id"], "DOCUMENT_UPLOADED",
+                                f"{req['label']}: {uploaded_file.name}", email)
                 st.rerun()
             col3.write("")
 
