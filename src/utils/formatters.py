@@ -1,15 +1,20 @@
 """Currency, percentage, and date formatting helpers."""
 
-from datetime import datetime, timedelta, timezone
+import math
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
-# Central Time offset (UTC-6 standard, UTC-5 daylight).
-# For a prototype, we use a fixed offset. A production app would use pytz/zoneinfo.
-_CT_OFFSET = timezone(timedelta(hours=-6))
+# Timestamps are stored as naive UTC ISO strings and shown in Central Time.
+# ZoneInfo follows daylight saving (CST UTC-6 / CDT UTC-5). On Windows the
+# zone data comes from the `tzdata` package in requirements.txt.
+_CENTRAL = ZoneInfo("America/Chicago")
 
 
 def _to_central(dt: datetime) -> datetime:
     """Convert a naive (UTC) datetime to Central Time."""
-    return dt.replace(tzinfo=timezone.utc).astimezone(_CT_OFFSET)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_CENTRAL)
 
 
 def fmt_currency(value: float) -> str:
@@ -53,6 +58,22 @@ def fmt_datetime(iso_str: str | None) -> str:
         return iso_str
 
 
+def utcnow() -> datetime:
+    """Current UTC time as a naive datetime, matching how timestamps are stored."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def now_utc() -> str:
     """Return current UTC time as ISO 8601 string."""
-    return datetime.utcnow().isoformat()
+    return utcnow().isoformat()
+
+
+def days_remaining(expiration_iso: str, now: datetime | None = None) -> int:
+    """Whole days left until a UTC expiration, counting a partial day as a day.
+
+    A 60-day lock taken a few seconds ago still has 60 days left; truncating
+    with timedelta.days showed 59 (finding F-03).
+    """
+    now = now or utcnow()
+    seconds = (datetime.fromisoformat(expiration_iso) - now).total_seconds()
+    return max(0, math.ceil(seconds / 86400))
