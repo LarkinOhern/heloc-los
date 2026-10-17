@@ -14,15 +14,36 @@ from src.config import (
 )
 from src.config_manager import get_setting, set_setting, reset_all_settings
 from src.utils.db_helpers import get_full_audit_log, get_system_audit_log, add_system_audit_entry
-from src.utils.formatters import fmt_datetime
+from src.utils.formatters import fmt_datetime, describe_changes
 
 
 def _current_user():
     return st.session_state.get("employee_display_name", "Admin")
 
 
+def _flash(message: str):
+    """Show a confirmation after the save's st.rerun().
+
+    Each save used to call st.success() and then st.rerun(), which cleared
+    the message before anyone saw it (finding N-02).
+    """
+    st.session_state["_admin_flash"] = message
+
+
+def _log_change(area: str, changes: dict) -> bool:
+    """Write a before/after audit entry (F-07). Returns False if nothing changed."""
+    diff = describe_changes(changes)
+    if not diff:
+        return False
+    add_system_audit_entry("CONFIG_CHANGE", f"{area}: {diff}", _current_user())
+    return True
+
+
 def render():
     st.header("Admin Configuration")
+    flash = st.session_state.pop("_admin_flash", None)
+    if flash:
+        st.success(flash)
 
     tabs = st.tabs([
         "Underwriting Guidelines",
@@ -51,7 +72,7 @@ def render():
     if st.button("Reset All Settings to Defaults", type="secondary"):
         reset_all_settings()
         add_system_audit_entry("CONFIG_RESET", "All settings reset to defaults", _current_user())
-        st.success("All settings reset to defaults.")
+        _flash("All settings reset to defaults.")
         st.rerun()
 
 
@@ -106,20 +127,24 @@ def _tab_underwriting():
         save_thresholds = st.form_submit_button("Save Thresholds", type="primary")
 
     if save_thresholds:
+        before = {k: get_setting(k) for k in (
+            "min_credit_score", "max_cltv", "max_dti",
+            "min_property_value", "min_heloc_amount", "max_heloc_amount")}
         set_setting("min_credit_score", int(min_credit))
         set_setting("max_cltv", max_cltv / 100)
         set_setting("max_dti", max_dti / 100)
         set_setting("min_property_value", int(min_prop))
         set_setting("min_heloc_amount", int(min_heloc))
         set_setting("max_heloc_amount", int(max_heloc))
-        add_system_audit_entry(
-            "CONFIG_CHANGE",
-            f"UW thresholds updated: FICO>={int(min_credit)}, CLTV<={max_cltv:.0f}%, "
-            f"DTI<={max_dti:.0f}%, PropVal>=${int(min_prop):,}, "
-            f"HELOC ${int(min_heloc):,}-${int(max_heloc):,}",
-            _current_user(),
-        )
-        st.success("Underwriting thresholds saved.")
+        changed = _log_change("UW thresholds", {
+            "Min credit score": (str(before["min_credit_score"]), str(int(min_credit))),
+            "Max CLTV": (f"{before['max_cltv']:.0%}", f"{max_cltv / 100:.0%}"),
+            "Max DTI": (f"{before['max_dti']:.0%}", f"{max_dti / 100:.0%}"),
+            "Min property value": (f"${before['min_property_value']:,}", f"${int(min_prop):,}"),
+            "Min HELOC": (f"${before['min_heloc_amount']:,}", f"${int(min_heloc):,}"),
+            "Max HELOC": (f"${before['max_heloc_amount']:,}", f"${int(max_heloc):,}"),
+        })
+        _flash("Underwriting thresholds saved." if changed else "No changes to save.")
         st.rerun()
 
     # ── Credit Score Tiers (unified: labels + pricing adjustments) ──
@@ -171,14 +196,15 @@ def _tab_underwriting():
         save_tiers = st.form_submit_button("Save Credit Tiers & Adjustments", type="primary")
 
     if save_tiers:
+        def summary(tiers):
+            return ", ".join(
+                f"{t['label']} ({t['min_score']}-{t['max_score']}): {t['rate_adjustment']:+.2f}%"
+                for t in tiers
+            )
+        changed = _log_change("Credit tiers", {"Tiers": (summary(credit_tiers), summary(updated_tiers))})
         set_setting("credit_tiers", updated_tiers)
-        tier_summary = ", ".join(
-            f"{t['label']} ({t['min_score']}-{t['max_score']}): {t['rate_adjustment']:+.2f}%"
-            for t in updated_tiers
-        )
-        add_system_audit_entry("CONFIG_CHANGE", f"Credit tiers updated: {tier_summary}", _current_user())
-        st.success("Credit tiers and rate adjustments saved. "
-                   "Changes will apply to the next pricing calculation.")
+        _flash("Credit tiers and rate adjustments saved. Changes apply to the next "
+               "pricing calculation." if changed else "No changes to save.")
         st.rerun()
 
 
@@ -235,20 +261,24 @@ def _tab_pricing():
         save_base = st.form_submit_button("Save Base Rates", type="primary")
 
     if save_base:
+        before = {k: get_setting(k) for k in (
+            "prime_rate", "base_margin", "autopay_discount",
+            "rate_floor", "rate_ceiling", "rate_lock_days")}
         set_setting("prime_rate", float(prime))
         set_setting("base_margin", float(margin))
         set_setting("autopay_discount", float(autopay))
         set_setting("rate_floor", float(floor))
         set_setting("rate_ceiling", float(ceiling))
         set_setting("rate_lock_days", int(lock_days))
-        add_system_audit_entry(
-            "CONFIG_CHANGE",
-            f"Base rates updated: Prime={prime:.2f}%, Margin={margin:.2f}%, "
-            f"Autopay disc={autopay:.2f}%, Floor={floor:.2f}%, "
-            f"Ceiling={ceiling:.2f}%, Lock={int(lock_days)}d",
-            _current_user(),
-        )
-        st.success("Base rate settings saved.")
+        changed = _log_change("Base rates", {
+            "Prime": (f"{before['prime_rate']:.2f}%", f"{prime:.2f}%"),
+            "Margin": (f"{before['base_margin']:.2f}%", f"{margin:.2f}%"),
+            "Autopay discount": (f"{before['autopay_discount']:.2f}%", f"{autopay:.2f}%"),
+            "Floor": (f"{before['rate_floor']:.2f}%", f"{floor:.2f}%"),
+            "Ceiling": (f"{before['rate_ceiling']:.2f}%", f"{ceiling:.2f}%"),
+            "Rate lock": (f"{before['rate_lock_days']} days", f"{int(lock_days)} days"),
+        })
+        _flash("Base rate settings saved." if changed else "No changes to save.")
         st.rerun()
 
     # ── FICO / Credit Score Adjustments ──────────────────────────────
@@ -282,12 +312,11 @@ def _tab_pricing():
         save_ltv = st.form_submit_button("Save LTV Adjustments")
 
     if save_ltv:
+        def summary(tiers):
+            return ", ".join(f"<={t['max_ltv']:.0%}: {t['adjustment']:+.2f}%" for t in tiers)
+        changed = _log_change("LTV adjustments", {"Tiers": (summary(ltv_adj), summary(updated_ltv))})
         set_setting("ltv_adjustments", updated_ltv)
-        ltv_summary = ", ".join(
-            f"<={t['max_ltv']:.0%}: {t['adjustment']:+.2f}%" for t in updated_ltv
-        )
-        add_system_audit_entry("CONFIG_CHANGE", f"LTV adjustments updated: {ltv_summary}", _current_user())
-        st.success("LTV adjustments saved.")
+        _flash("LTV adjustments saved." if changed else "No changes to save.")
         st.rerun()
 
     # ── Amount Adjustments ───────────────────────────────────────────
@@ -314,12 +343,11 @@ def _tab_pricing():
         save_amt = st.form_submit_button("Save Amount Adjustments")
 
     if save_amt:
+        def summary(tiers):
+            return ", ".join(f">=${t['min_amount']:,}: {t['adjustment']:+.2f}%" for t in tiers)
+        changed = _log_change("Amount adjustments", {"Tiers": (summary(amt_adj), summary(updated_amt))})
         set_setting("amount_adjustments", updated_amt)
-        amt_summary = ", ".join(
-            f">=${t['min_amount']:,}: {t['adjustment']:+.2f}%" for t in updated_amt
-        )
-        add_system_audit_entry("CONFIG_CHANGE", f"Amount adjustments updated: {amt_summary}", _current_user())
-        st.success("Amount adjustments saved.")
+        _flash("Amount adjustments saved." if changed else "No changes to save.")
         st.rerun()
 
 
