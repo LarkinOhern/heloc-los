@@ -13,7 +13,11 @@ and dict-style row access by column name.
 import os
 import sqlite3
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "heloc_los.db")
+# HELOC_DB_PATH lets tests point the app at a throwaway database.
+DB_PATH = os.environ.get(
+    "HELOC_DB_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "data", "heloc_los.db"),
+)
 
 # Cached Turso connection — reused across calls to avoid repeated sync overhead.
 _turso_conn = None

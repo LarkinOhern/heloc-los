@@ -18,7 +18,10 @@ from src.documents.templates import (
 )
 
 # Output directory for generated PDFs
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "generated")
+OUTPUT_DIR = os.environ.get(
+    "HELOC_OUTPUT_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "..", "docs", "generated"),
+)
 
 
 class HelocPDF(FPDF):
