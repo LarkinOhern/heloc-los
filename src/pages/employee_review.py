@@ -23,10 +23,14 @@ from src.utils.db_helpers import (
 )
 from src.config_manager import get_setting
 from src.engines.underwriting import UnderwritingInput, run_underwriting
-from src.engines.pricing import PricingInput, calculate_pricing
+from src.engines.pricing import PricingInput, calculate_pricing, amount_tier_label
+from src.engines.workflow import blocking_conditions
 from src.utils.styles import status_badge
 from src.documents.generator import generate_decision_letter, generate_closing_documents
-from src.utils.formatters import fmt_currency, fmt_date, fmt_datetime, fmt_percent, fmt_rate, now_utc
+from src.utils.formatters import (
+    fmt_currency, fmt_date, fmt_datetime, fmt_percent, fmt_rate, now_utc,
+    utcnow, days_remaining,
+)
 
 
 def render():
@@ -135,6 +139,14 @@ def _render_status_bar(app: dict):
             key="status_change",
         )
         if new_status and col3.button("Update Status"):
+            blockers = blocking_conditions(new_status, get_conditions(app["id"]))
+            if blockers:
+                listed = "".join(f"\n- {c['description']}" for c in blockers)
+                st.error(
+                    f"Resolve these open conditions before moving to "
+                    f"{STATUS_LABELS.get(new_status, new_status)}:{listed}"
+                )
+                return
             update_application(app["id"], status=new_status)
             add_audit_entry(
                 app["id"], "STATUS_CHANGE",
@@ -437,9 +449,9 @@ def _match_pricing_tiers(lock: dict) -> tuple[str, str, str]:
     # Amount
     amount_tier = ""
     amount_adjustments = get_setting("amount_adjustments")
-    for tier in amount_adjustments:
+    for i, tier in enumerate(amount_adjustments):
         if abs(tier["adjustment"] - lock["amount_adjustment"]) < 0.001:
-            amount_tier = f">= ${tier['min_amount']:,.0f}"
+            amount_tier = amount_tier_label(amount_adjustments, i)
             break
 
     return fico_tier, ltv_tier, amount_tier
@@ -507,15 +519,12 @@ def _tab_pricing(app: dict):
         # ── Rate Lock ────────────────────────────────────────────────
         if lock["rate_locked"]:
             # Show lock status with countdown
-            from datetime import datetime
-            lock_exp = datetime.fromisoformat(lock["lock_expiration"])
-            now_dt = datetime.utcnow()
-            days_remaining = (lock_exp - now_dt).days
+            days_left = days_remaining(lock["lock_expiration"])
 
-            if days_remaining > 0:
+            if days_left > 0:
                 st.success(
                     f"Rate locked on {fmt_date(lock['lock_date'])} — "
-                    f"**{days_remaining} days remaining** "
+                    f"**{days_left} days remaining** "
                     f"(expires {fmt_date(lock['lock_expiration'])})"
                 )
             else:
@@ -568,13 +577,16 @@ def _execute_pricing(app: dict, latest_decision: dict, current_user: str):
 
 
 def _lock_rate(app: dict, lock: dict, current_user: str):
-    """Lock the rate with a 60-day expiration."""
-    from datetime import datetime, timedelta
-    from src.config import RATE_LOCK_DAYS
+    """Lock the rate for the admin-configured number of days."""
+    from datetime import timedelta
     from src.database import get_connection
 
-    now_str = now_utc()
-    expiration = (datetime.utcnow() + timedelta(days=RATE_LOCK_DAYS)).isoformat()
+    # Read the admin setting; the old code used the config.py constant and
+    # ignored Admin > Pricing > Rate Lock Duration (finding F-08).
+    lock_days = int(get_setting("rate_lock_days"))
+    now = utcnow()
+    now_str = now.isoformat()
+    expiration = (now + timedelta(days=lock_days)).isoformat()
 
     # Update the pricing_locks row directly
     conn = get_connection()
@@ -587,7 +599,7 @@ def _lock_rate(app: dict, lock: dict, current_user: str):
 
     add_audit_entry(
         app["id"], "RATE_LOCKED",
-        f"Rate of {lock['final_rate']:.3f}% locked for {RATE_LOCK_DAYS} days (expires {expiration[:10]})",
+        f"Rate of {lock['final_rate']:.3f}% locked for {lock_days} days (expires {expiration[:10]})",
         current_user,
     )
 
