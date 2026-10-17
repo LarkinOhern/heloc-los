@@ -29,10 +29,25 @@ class PricingOutput:
     ltv_adjustment: float = 0.0
     ltv_tier: str = ""               # e.g. "CLTV <= 60%"
     amount_adjustment: float = 0.0
-    amount_tier: str = ""            # e.g. ">= $250,000"
+    amount_tier: str = ""            # e.g. "$250,000 and up"
     autopay_discount: float = 0.0
     final_rate: float = 0.0
     monthly_payment: float = 0.0     # Interest-only at full draw
+
+
+def amount_tier_label(tiers: list[dict], i: int) -> str:
+    """Readable range for amount tier ``i`` (tiers are ordered largest first).
+
+    Labels used to be ">= $0", and the leading ">" turned into a Markdown
+    blockquote on screen (finding F-04).
+    """
+    low = tiers[i]["min_amount"]
+    if i == 0:
+        return f"${low:,.0f} and up"
+    high = tiers[i - 1]["min_amount"]
+    if low <= 0:
+        return f"Under ${high:,.0f}"
+    return f"${low:,.0f} to ${high - 1:,.0f}"
 
 
 def calculate_pricing(inp: PricingInput) -> PricingOutput:
@@ -75,10 +90,10 @@ def calculate_pricing(inp: PricingInput) -> PricingOutput:
         out.ltv_tier = f"CLTV <= {ltv_adjustments[-1]['max_ltv']:.0%}"
 
     # ── Amount Adjustment ────────────────────────────────────────────
-    for tier in amount_adjustments:
+    for i, tier in enumerate(amount_adjustments):
         if inp.heloc_amount >= tier["min_amount"]:
             out.amount_adjustment = tier["adjustment"]
-            out.amount_tier = f">= ${tier['min_amount']:,.0f}"
+            out.amount_tier = amount_tier_label(amount_adjustments, i)
             break
 
     # ── Autopay Discount ─────────────────────────────────────────────
