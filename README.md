@@ -25,6 +25,32 @@ The database is automatically created and seeded with 5 sample applications on f
 - **Bob Wilson** (Loan Officer) — has apps 2, 5 assigned
 - **Admin User** (Admin) — full access + config view
 
+## Tests
+
+```bash
+pip install pytest
+python -m pytest tests -q
+```
+
+46 tests run the engines directly and drive the real app headlessly with
+Streamlit's `AppTest`, each against a throwaway SQLite database
+(`HELOC_DB_PATH` / `HELOC_OUTPUT_DIR` override the defaults). Every test
+traces to a finding from the browser test log: `test_logic.py` and
+`test_app_flows.py` (round 1), `test_round2.py`, `test_round3.py`.
+
+### Workflow controls
+
+- Loan officers can change only files assigned to them; unassigned files must be
+  claimed first. Admins can work any file and reassign it.
+- Closing is blocked by open prior-to-closing and internal-review conditions;
+  funding by any open condition.
+- Underwriting-engine warnings become **internal review** items: the officer
+  clears them, the borrower never sees them.
+- Conditions can name the document that satisfies them. The borrower sees it
+  marked *Requested*; the officer sees when it arrives.
+- Waiving a condition requires a written reason, kept in the audit trail.
+- Borrowers see a plain-language timeline, not the internal audit log.
+
 ## Architecture
 
 | Layer | Tool |
