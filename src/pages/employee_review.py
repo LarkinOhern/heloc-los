@@ -326,7 +326,7 @@ def _tab_underwriting(app: dict):
         if st.button("Run Underwriting Engine", type="primary"):
             _execute_underwriting(app, current_user)
             st.rerun()
-    elif app["status"] in ("SUBMITTED",):
+    elif app["status"] in ("SUBMITTED",) and can_work(app):
         st.info("Move the application to **In Review** or **Underwriting** before running the engine.")
 
     st.divider()
@@ -501,7 +501,7 @@ def _tab_pricing(app: dict):
         if st.button("Calculate Pricing", type="primary"):
             _execute_pricing(app, decisions[0], current_user)
             st.rerun()
-    elif not decisions:
+    elif not decisions and can_work(app):
         st.info("Run underwriting first — pricing needs the credit score and CLTV from the UW decision.")
 
     st.divider()
